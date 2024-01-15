@@ -1,0 +1,5 @@
+Assuming one is running Guix as their operating system, then to update the contents of this folder run:
+
+#+begin_src shell
+make
+#+end_src
