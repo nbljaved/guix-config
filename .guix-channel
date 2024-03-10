@@ -4,7 +4,7 @@
  (directory "nbl")
  (dependencies
   (channel
-   (name 'nonguix)
+   (name nonguix)
    (url "https://gitlab.com/nonguix/nonguix")
    ;; Enable signature verification:
    (introduction
