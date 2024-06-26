@@ -11,9 +11,15 @@
 (use-modules 
  (gnu)
  (gnu packages package-management)
+ (gnu packages bash)
+ (gnu packages admin)
+ (gnu packages lisp-xyz)
+ (gnu packages wm)
  (nongnu packages linux)
  (nongnu packages firmware)
- (nongnu system linux-initrd))
+ (nongnu system linux-initrd)
+ (packages tailscale)
+ (services tailscale))
 
 (use-package-modules
  curl
@@ -47,6 +53,7 @@
                 (comment "Nabeel Javed")
                 (group "users")
                 (home-directory "/home/nabeel")
+                (shell (file-append bash "/bin/bash"))
                 (supplementary-groups '("wheel" ;allow use of sudo, etc.
                                         "tty"
                                         "netdev"
@@ -59,20 +66,23 @@
  ;; Packages installed system-wide.  Users can also install packages
  ;; under their own account: use 'guix search KEYWORD' to search
  ;; for packages and 'guix install PACKAGE' to install a package.
- (packages (append (list (specification->package "nss-certs")
-                         curl
+ (packages (append (list curl
                          emacs
                          font-dejavu
                          font-fira-code
                          git
                          nix
-                         sbcl
                          sway
-			 swaylock-effects
-			 swaybg
+                         swaylock-effects
+                         swaybg
                          swayidle
-			 waybar
+                         waybar
+                         tailscale
                          ;; stumpwm
+                         sbcl
+                         (specification->package "stumpwm-with-slynk")
+                         i3lock
+                         ;; sbcl-slynk
                          ;; `(,stumpwm "lib")
                          ;; sbcl-stumpwm-ttf-fonts
                          )
@@ -92,13 +102,20 @@
                 (service cups-service-type)
                 (set-xorg-configuration
                  (xorg-configuration (keyboard-layout keyboard-layout)))
-		(service screen-locker-service-type
-			 (screen-locker-configuration
-			  (name "swaylock")
-			  (program (file-append swaylock "bin/swaylock"))
-			  (using-pam? #t)
-			  (using-setuid? #f)))
-                (service nix-service-type))
+                (service screen-locker-service-type
+                         (screen-locker-configuration
+                          (name "swaylock")
+                          (program (file-append swaylock "bin/swaylock"))
+                          (using-pam? #t)
+                          (using-setuid? #f)))
+                (service screen-locker-service-type
+                         (screen-locker-configuration
+                          (name "i3lock")
+                          (program (file-append swaylock "bin/i3lock"))
+                          (using-pam? #t)
+                          (using-setuid? #f)))
+                (service nix-service-type)
+                (service tailscaled-service-type))
 
           ;; This is the default list of services we
           ;; are appending to.
@@ -107,7 +124,7 @@
                            (gdm-service-type config =>
                                              (gdm-configuration
                                               (inherit config)
-                                              (wayland? #t)))
+                                              (wayland? #f)))
                            ;; enable substitute for nonguix - should help with large package eg: linux, firefox
                            (guix-service-type config => (guix-configuration
                                                          (inherit config)

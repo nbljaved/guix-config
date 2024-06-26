@@ -1,12 +1,12 @@
-(define-module (nbl services tailscale)
+(define-module (services tailscale)
   #:use-module (gnu services)
   #:use-module (gnu services shepherd)
   #:use-module (gnu services configuration)
   #:use-module (guix records)
   #:use-module (guix gexp)
   #:use-module (ice-9 match)
-  #:use-module (nbl packages tailscale)
-  #:use-module (nongnu packages linux)
+  #:use-module (packages tailscale)
+  #:use-module (gnu packages linux)
   #:export (tailscaled-service-type tailscaled-configuration))
 
 ;; TODO: https://tailscale.com/kb/1188/linux-dns/#dhcp-dhclient-overwriting-etcresolvconf

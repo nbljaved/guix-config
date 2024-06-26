@@ -1,6 +1,6 @@
-(define-module (nbl packages tailscale)
+(define-module (packages tailscale)
   #:use-module (guix packages)
-  #:use-module (nongnu packages linux)
+  #:use-module (gnu packages linux)
   #:use-module (guix gexp)
   #:use-module (guix build-system copy)
   #:use-module (guix download)

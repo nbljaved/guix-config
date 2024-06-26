@@ -3,3 +3,7 @@ Assuming one is running Guix as their operating system, then to update the conte
 #+begin_src shell
 make
 #+end_src
+
+#+begin_src sh
+sudo guix system reconfigure -L ~/guix-config/nbl /etc/config.scm 
+#+end_src
