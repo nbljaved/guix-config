@@ -19,7 +19,10 @@
  (nongnu packages firmware)
  (nongnu system linux-initrd)
  (packages tailscale)
- (services tailscale))
+ (services tailscale)
+ (srfi srfi-1)
+ (guix inferior)
+ (guix channels))
 
 (use-package-modules
  curl
@@ -38,7 +41,26 @@
  xorg)
 
 (operating-system
- (kernel linux)
+ (kernel
+  ;; https://github.com/nonguix/nonguix#pinning-package-versions
+  ;; 
+  ;; When using substitutes is not an option, you may find that guix
+  ;; system reconfigure recompiles the kernel frequently due to
+  ;; version bumps in the kernel package. An inferior can be used to
+  ;; pin the kernel version and avoid lengthy rebuilds.
+  (let*
+      ((channels
+        (list (channel
+               (name 'nonguix)
+               (url "https://gitlab.com/nonguix/nonguix")
+               (commit "143b597422bf01a8fa0e8b4e6e3ece3b3ebe9752"))
+              (channel
+               (name 'guix)
+               (url "https://git.savannah.gnu.org/git/guix.git")
+               (commit "7daf9328921f9f7d4fe4839d8e16091bd9f06072"))))
+       (inferior
+        (inferior-for-channels channels)))
+    (first (lookup-inferior-packages inferior "linux" "6.9.3"))))
  (initrd microcode-initrd)
  ;; includes iwlwif, intel microcode
  (firmware (list linux-firmware))  

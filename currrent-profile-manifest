@@ -5,7 +5,9 @@
 ;; See the "Replicating Guix" section in the manual.
 
 (specifications->manifest
-  (list "go"
+  (list "python-ipython"
+        "go"
+        "ncurses"
         "emacs-auctex"
         "emacs-guix"
         "nyxt"

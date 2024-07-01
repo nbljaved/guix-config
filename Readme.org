@@ -1,9 +1,138 @@
 Assuming one is running Guix as their operating system, then to update the contents of this folder run:
 
+#+CAPTION: To update this repository by fetching the config files from appropriate locations
 #+begin_src shell
 make
 #+end_src
 
+#+CAPTION: To reconfigure the system with my custom packages
 #+begin_src sh
 sudo guix system reconfigure -L ~/guix-config/nbl /etc/config.scm 
 #+end_src
+
+* Nix
+I use Nix for packages that aren't currently available in Guix, or those I might need at a moments notice.
+
+#+CAPTION: Enable nix service in Guix
+(see [[https://guix.gnu.org/manual/en/html_node/Miscellaneous-Services.html][Guix Miscellaneous Services]])
+#+begin_src lisp :eval no
+;; Add this service in services /etc/config.scm
+(service nix-service-type)
+#+end_src
+
+After guix system reconfigure configure Nix for your user:
+
+ * Add a Nix channel and update it. See [[https://nixos.org/nix/manual/][Nix Package Manager Guide]].
+ * Create a symlink to your profile and activate Nix profile: 
+
+ #+CAPTION: This is what the Guix manual says, but I am just did the source step
+ #+begin_src shell :eval no
+ ln -s "/nix/var/nix/profiles/per-user/$USER/profile" ~/.nix-profile
+ source /run/current-system/profile/etc/profile.d/nix.sh
+ #+end_src
+
+** Nix Channel setup
+
+#+CAPTION: https://nixos.wiki/wiki/Nix_channels
+#+begin_src shell
+## Common nix-channel commands
+
+# Listing current channels
+nix-channel --list
+
+# Adding a primary channel
+nix-channel --add https://nixos.org/channels/channel-name nixos
+# For eg: nix-channel --add https://nixos.org/channels/nixos-24.05 nixpkgs
+
+# Adding other channels
+nix-channel --add https://some.channel/url my-alias
+
+# Remove a channel
+nix-channel --remove channel-alias
+
+# Updating a channel
+nix-channel --update channel-alias
+
+# Updating all channels
+nix-channel --update
+
+# Note that updating channels won't cause a rebuild in itself; if you
+# want to update channels and rebuild, you can use nixos-rebuild with
+# the --upgrade flag to do both in one step.
+
+# Also need to load the nixpkgs channel
+nix-channel --add channel-url nixpkgs
+#+end_src
+
+** nix-env cheatsheet
+
+#+begin_src shell :results output
+curl cheat.sh/nix-env
+#+end_src
+
+#+RESULTS:
+#+begin_example
+# nix-env
+# Manipulate or query Nix user environments.
+# More information: <https://nixos.org/manual/nix/stable/#sec-nix-env>.
+
+# List all installed packages:
+nix-env -q
+
+# Query installed packages:
+nix-env -q search_term
+
+# Query available packages:
+nix-env -qa search_term
+
+# Install package:
+nix-env -iA nixpkgs.pkg_name
+
+# Install a package from a URL:
+nix-env -i pkg_name --file example.com
+
+# Uninstall package:
+nix-env -e pkg_name
+
+# Upgrade one package:
+nix-env -u pkg_name
+
+# Upgrade all packages:
+nix-env -u
+#+end_example
+
+** nix-env quickstart
+
+#+CAPTION: https://nix.dev/manual/nix/2.18/quick-start
+#+begin_src shell
+# See what installable packages are currently available in the channel:
+nix-env --query --available --attr-path
+
+# Install a package from the channel
+nix-env --install --attr nixpkgs.hello
+
+# Uninstall a package:
+nix-env --uninstall hello
+
+# Test packages without installing them
+nix-shell --packages hello
+
+# To keep up-to-date with the channel, do:
+nix-channel --update nixpkgs
+nix-env --upgrade '*'
+
+# The latter command will upgrade each installed package for which
+# there is a “newer” version (as determined by comparing the version
+# numbers).
+
+# If you're unhappy with the result of a nix-env action (e.g., an
+# upgraded package turned out not to work properly), you can go back:
+
+nix-env --rollback
+
+You should periodically run the Nix garbage collector to get rid of unused packages, since uninstalls or upgrades don't actually delete them:
+
+ nix-collect-garbage --delete-old
+#+end_src
+
+#+RESULTS:
