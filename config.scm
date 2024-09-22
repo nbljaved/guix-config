@@ -26,6 +26,7 @@
 
 (use-package-modules
  curl
+ docker
  emacs
  fonts
  lisp
@@ -35,6 +36,7 @@
 (use-service-modules
  cups
  desktop
+ docker
  networking
  nix
  ssh
@@ -90,6 +92,10 @@
  ;; under their own account: use 'guix search KEYWORD' to search
  ;; for packages and 'guix install PACKAGE' to install a package.
  (packages (append (list curl
+                         ;; docker
+                         docker-cli
+                         docker-compose
+                         ;;
                          emacs
                          font-dejavu
                          font-fira-code
@@ -126,6 +132,10 @@
                          (bluetooth-configuration
                           (auto-enable? #t)))
                 (service cups-service-type)
+                (service docker-service-type)
+                ;; Have to manually add containerd service to use in docker.
+                ;; https://lists.nongnu.org/archive/html/guix-patches/2024-06/msg00177.html
+                (service containerd-service-type)
                 (set-xorg-configuration
                  (xorg-configuration (keyboard-layout keyboard-layout)))
                 (service screen-locker-service-type
