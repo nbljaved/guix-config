@@ -25,7 +25,7 @@ After guix system reconfigure configure Nix for your user:
  * Add a Nix channel and update it. See [[https://nixos.org/nix/manual/][Nix Package Manager Guide]].
  * Create a symlink to your profile and activate Nix profile: 
 
- #+CAPTION: This is what the Guix manual says, but I am just did the source step
+ #+CAPTION: This is what the Guix manual says, but I just did the source step
  #+begin_src shell :eval no
  ln -s "/nix/var/nix/profiles/per-user/$USER/profile" ~/.nix-profile
  source /run/current-system/profile/etc/profile.d/nix.sh

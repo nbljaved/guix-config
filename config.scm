@@ -79,6 +79,7 @@
                 (supplementary-groups '("wheel" ;allow use of sudo, etc.
                                         "tty"
                                         "netdev"
+                                        "lp"    ;Users need to be in the lp group to access the D-Bus service, like bluetooth. 
                                         "audio" ;sound card
                                         "video" ;video devices such as webcams
                                         "input"
@@ -121,6 +122,9 @@
                           ;; Currently the default is #t but it's considered
                           ;; unsafe.  Explicitly pass #f.
                           (password-authentication? #f)))
+                (service bluetooth-service-type
+                         (bluetooth-configuration
+                          (auto-enable? #t)))
                 (service cups-service-type)
                 (set-xorg-configuration
                  (xorg-configuration (keyboard-layout keyboard-layout)))
