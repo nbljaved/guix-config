@@ -38,7 +38,6 @@
  desktop
  docker
  networking
- nix
  ssh
  xorg)
 
@@ -55,16 +54,19 @@
         (list (channel
                (name 'nonguix)
                (url "https://gitlab.com/nonguix/nonguix")
-               (commit "143b597422bf01a8fa0e8b4e6e3ece3b3ebe9752"))
+               (commit "e355a2ff675abd48f671a867c211c98707ca1e82"))
               (channel
                (name 'guix)
                (url "https://git.savannah.gnu.org/git/guix.git")
-               (commit "7daf9328921f9f7d4fe4839d8e16091bd9f06072"))))
+               (commit "b8fd792ea267cb920da0651074a533d8abf00488"))))
        (inferior
         (inferior-for-channels channels)))
-    (first (lookup-inferior-packages inferior "linux" "6.9.3"))))
+    (first (lookup-inferior-packages inferior "linux" "6.10.13")))
+  ;;
+  ;; linux
+  )
  (initrd microcode-initrd)
- ;; includes iwlwif, intel microcode
+ ;; includes iwlwifi, intel microcode
  (firmware (list linux-firmware))  
  (locale "en_IN.utf8")
  (timezone "Asia/Kolkata")
@@ -100,7 +102,6 @@
                          font-dejavu
                          font-fira-code
                          git
-                         nix
                          sway
                          swaylock-effects
                          swaybg
@@ -150,7 +151,6 @@
                           (program (file-append swaylock "bin/i3lock"))
                           (using-pam? #t)
                           (using-setuid? #f)))
-                (service nix-service-type)
                 (service tailscaled-service-type))
 
           ;; This is the default list of services we
@@ -161,6 +161,11 @@
                                              (gdm-configuration
                                               (inherit config)
                                               (wayland? #f)))
+                           (elogind-service-type
+                            config =>
+                            (elogind-configuration
+                             (inherit config)
+                             (handle-power-key 'suspend)))
                            ;; enable substitute for nonguix - should help with large package eg: linux, firefox
                            (guix-service-type config => (guix-configuration
                                                          (inherit config)

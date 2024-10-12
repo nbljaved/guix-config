@@ -5,7 +5,9 @@
 ;; See the "Replicating Guix" section in the manual.
 
 (specifications->manifest
-  (list "smartmontools"
+  (list "librewolf"
+        "net-tools"
+        "smartmontools"
         "nvme-cli"
         "calibre"
         "blueman"
@@ -30,7 +32,6 @@
         "telegram-desktop"
         "transmission"
         "mpv"
-        "firefox"
         "ani-cli"
         "gst-libav"
         "zoxide"
