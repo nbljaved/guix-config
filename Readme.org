@@ -7,7 +7,34 @@ make
 
 #+CAPTION: To reconfigure the system with my custom packages
 #+begin_src sh
-sudo guix system reconfigure -L ~/guix-config/nbl /etc/config.scm 
+
+# sudo guix system reconfigure -L ~/guix-config/nbl /etc/config.scm
+sudo guix system reconfigure
+
+#+end_src
+
+* Guix Home
+https://guix.gnu.org/manual/devel/en/html_node/Declaring-the-Home-Environment.html
+
+#+CAPTION: To set it up
+#+begin_src sh
+
+# The guix home import command reads some of the “dot files” such as ~/.bashrc found in your home directory and copies them to the given directory, ~/guix-config/guix-home in this case; it also reads the contents of your profile, ~/.guix-profile, and, based on that, it populates ~/guix-config/guix-home/home-configuration.scm with a Home configuration that resembles your current configuration. 
+
+guix home import ~/guix-config/guix-home
+
+#+end_src
+
+#+CAPTION: To reconfigure
+#+begin_src sh
+guix home reconfigure ~/guix-config/guix-home/home-configuration.scm
+#+end_src
+
+#+CAPTION: Once the configuration looks good, you can first test it in a throw-away “container”
+#+begin_src sh
+
+guix home container path-to-home-config.scm
+
 #+end_src
 
 * Nix
