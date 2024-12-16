@@ -5,6 +5,7 @@ keymap:
       not: [/(?i)emacs/, /(?i)kitty/] 
       #only: [google-chrome.Google-chrome, /(?i)librewolf/]
     remap:
+      C-q: { escape_next_key: true }
       # Cursor
       C-b: { with_mark: left }
       C-f: { with_mark: right }
