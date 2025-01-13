@@ -2,7 +2,7 @@
 keymap:
   - name: Something
     application:
-      not: [/(?i)emacs/, /(?i)kitty/] 
+      not: [/(?i)emacs/, /(?i)kitty/, /(?i)code/, /(?i)flameshot/, ]
       #only: [google-chrome.Google-chrome, /(?i)librewolf/]
     remap:
       C-q: { escape_next_key: true }
