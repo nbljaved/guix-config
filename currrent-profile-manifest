@@ -5,13 +5,16 @@
 ;; See the "Replicating Guix" section in the manual.
 
 (specifications->manifest
-  (list "xhost"
+  (list "patchelf"
+        "python-next"
+        "strace"
+        "ktorrent"
+        "xhost"
         "wmctrl"
         "poppler"
         "ghostscript"
         "texlive-pdfcrop"
         "perl"
-        "python-lsp-server"
         "google-chrome-stable"
         "flatpak"
         "librewolf"
@@ -47,7 +50,7 @@
         "dunst"
         "rofi"
         "fuzzel"
-        "node"
+        "node@18"
         "password-store"
         "imagemagick"
         "texlive"

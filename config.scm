@@ -40,6 +40,7 @@
  desktop
  docker
  networking
+ nix
  ssh
  xorg)
 
@@ -105,8 +106,9 @@
                           font-dejavu
                           font-fira-code
                           git
-                          python
-                          python-setuptools
+                          ;; nix (for devenv.sh and uv, etc.)
+                          nix
+                          ;; 
                           ;; sway
                           ;; swaylock-effects
                           ;; swaybg
@@ -159,25 +161,26 @@
                            (using-setuid? #f)))
                  (service mysql-service-type)
                  (service tailscale-service-type)
+                 (service nix-service-type)
                  ;; Add a uinput udev rule so that Xremap can run without root
-	         ;; permissions.
+                 ;; permissions.
                  ;; https://github.com/xremap/xremap?tab=readme-ov-file#running-xremap-without-sudo
-	         (udev-rules-service 'uinput
-			             (udev-rule
-			              "input.rules"
-			              "KERNEL==\"uinput\", GROUP=\"input\", TAG+=\"uaccess\""))
-	         (simple-service 'xremap-service
-			         shepherd-root-service-type
-			         (list (shepherd-service
-				        (provision '(xremap))
-				        (requirement '())
-				        (start #~(make-forkexec-constructor
-					          (list #$(file-append xremap-x11
+                 (udev-rules-service 'uinput
+                                     (udev-rule
+                                      "input.rules"
+                                      "KERNEL==\"uinput\", GROUP=\"input\", TAG+=\"uaccess\""))
+                 (simple-service 'xremap-service
+                                 shepherd-root-service-type
+                                 (list (shepherd-service
+                                        (provision '(xremap))
+                                        (requirement '())
+                                        (start #~(make-forkexec-constructor
+                                                  (list #$(file-append xremap-x11
                                                                        "/bin/xremap"
                                                                        "--watch=config"
                                                                        "--watch=device"
                                                                        "/etc/xremap.yaml"))))
-				        (stop #~(make-kill-destructor)))))
+                                        (stop #~(make-kill-destructor)))))
                  )
 
            ;; This is the default list of services we
