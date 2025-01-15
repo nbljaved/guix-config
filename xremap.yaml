@@ -1,6 +1,15 @@
 # Credit: https://github.com/mooz/xkeysnail/blob/bf3c93b4fe6efd42893db4e6588e5ef1c4909cfb/example/config.py#L62-L125
+modmap:
+  - name: Key to key remapping like xmodmap
+    remap:
+      KEY_RIGHTALT: KEY_LEFTALT
+      KEY_CAPSLOCK:
+        alone: KEY_MENU
+        held: KEY_LEFTCTRL
+        # alone_timeout_millis: 1000 # Optional
+
 keymap:
-  - name: Something
+  - name: Emacs bindings
     application:
       not: [/(?i)emacs/, /(?i)kitty/, /(?i)code/, /(?i)flameshot/, ]
       #only: [google-chrome.Google-chrome, /(?i)librewolf/]
