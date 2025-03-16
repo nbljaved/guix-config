@@ -9,7 +9,7 @@ make
 #+begin_src sh
 
 # sudo guix system reconfigure -L ~/guix-config/nbl /etc/config.scm
-sudo guix system reconfigure
+sudo guix system reconfigure /etc/config.scm
 
 #+end_src
 
