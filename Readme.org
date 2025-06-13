@@ -69,7 +69,7 @@ nix-channel --list
 
 # Adding a primary channel
 nix-channel --add https://nixos.org/channels/channel-name nixos
-# For eg: nix-channel --add https://nixos.org/channels/nixos-24.05 nixpkgs
+# For eg: nix-channel --add https://nixos.org/channels/nixos-25.05 nixpkgs
 
 # Adding other channels
 nix-channel --add https://some.channel/url my-alias
