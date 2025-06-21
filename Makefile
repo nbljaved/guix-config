@@ -3,7 +3,7 @@ all: sync
 sync: guix nix
 
 guix:
-	cat /etc/config.scm > config.scm
+	cat /etc/config.scm > config-thinkpad.scm
 	# cat /etc/xremap.yaml > xremap.yaml
 	cat "${HOME}/.config/guix/channels.scm" > channels.scm
 	guix package --export-manifest > currrent-profile-manifest
