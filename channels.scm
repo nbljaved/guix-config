@@ -21,14 +21,14 @@
        ;;                      "/guix-config"))
        ;;  (directory "nbl")
        ;;  (branch "main"))
-       (channel
-        (name 'tailscale)
-        (url "https://github.com/umanwizard/guix-tailscale")
-        (branch "main")
-        (commit "d0b1b05fdcf1407da72db803bf08fa6f223f9bae")
-        (introduction
-         (make-channel-introduction
-          "c72e15e84c4a9d199303aa40a81a95939db0cfee"
-          (openpgp-fingerprint
-           "9E53FC33B8328C745E7B31F70226C10D7877B741"))))
+       ;; (channel
+       ;;  (name 'tailscale)
+       ;;  (url "https://github.com/umanwizard/guix-tailscale")
+       ;;  (branch "main")
+       ;;  (commit "d0b1b05fdcf1407da72db803bf08fa6f223f9bae")
+       ;;  (introduction
+       ;;   (make-channel-introduction
+       ;;    "c72e15e84c4a9d199303aa40a81a95939db0cfee"
+       ;;    (openpgp-fingerprint
+       ;;     "9E53FC33B8328C745E7B31F70226C10D7877B741"))))
        %default-channels)
