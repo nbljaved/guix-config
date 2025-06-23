@@ -5,13 +5,14 @@
 ;; See the "Replicating Guix" section in the manual.
 
 (specifications->manifest
-  (list "emacs-magit-todos"
+  (list "udiskie"
+        "emacs"
+        "emacs-magit-todos"
         "emacs-magit"
         "okular"
         "emacs-telega"
         "cloc"
         "polybar"
-        "emacs"
         "kitty"
         "ncdu"
         "picom"

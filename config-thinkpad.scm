@@ -51,22 +51,36 @@
   ;; system reconfigure recompiles the kernel frequently due to
   ;; version bumps in the kernel package. An inferior can be used to
   ;; pin the kernel version and avoid lengthy rebuilds.
-  (let*
-      ((channels
-        (list (channel
-               (name 'nonguix)
-               (url "https://gitlab.com/nonguix/nonguix")
-               (commit "e355a2ff675abd48f671a867c211c98707ca1e82"))
-              (channel
-               (name 'guix)
-               (url "https://git.savannah.gnu.org/git/guix.git")
-               (commit "b8fd792ea267cb920da0651074a533d8abf00488"))))
-       (inferior
-        (inferior-for-channels channels)))
-    (first (lookup-inferior-packages inferior "linux" "6.10.13")))
   ;;
-  ;; linux
-  )
+  ;; (let*
+  ;;     ((channels
+  ;;       (list (channel
+  ;;              (name 'nonguix)
+  ;;              (url "https://gitlab.com/nonguix/nonguix")
+  ;;              (branch "master")
+  ;;              (commit
+  ;;               "94c750ad596f513d5659ce9909022ed09f864537")
+  ;;              (introduction
+  ;;               (make-channel-introduction
+  ;;                "897c1a470da759236cc11798f4e0a5f7d4d59fbc"
+  ;;                (openpgp-fingerprint
+  ;;                 "2A39 3FFF 68F4 EF7A 3D29  12AF 6F51 20A0 22FB B2D5"))))
+  ;;             (channel
+  ;;              (name 'guix)
+  ;;              (url "https://git.guix.gnu.org/guix.git")
+  ;;              (branch "master")
+  ;;              (commit
+  ;;               "5239ec21fda51687671c6667a3bffbcd32bbc9d5")
+  ;;              (introduction
+  ;;               (make-channel-introduction
+  ;;                "9edb3f66fd807b096b48283debdcddccfea34bad"
+  ;;                (openpgp-fingerprint
+  ;;                 "BBB0 2DDF 2CEA F6A8 0D1D  E643 A2A0 6DF2 A33A 54FA"))))))
+  ;;      (inferior
+  ;;       (inferior-for-channels channels)))
+  ;;   (first (lookup-inferior-packages inferior "linux" "6.10.13")))
+  ;;
+  linux)
  (initrd microcode-initrd)
  ;; includes iwlwifi, intel microcode
  (firmware (list linux-firmware))
