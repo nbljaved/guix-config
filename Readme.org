@@ -1,9 +1,18 @@
-Assuming one is running Guix as their operating system, then to update the contents of this folder run:
+Your current profile and other stuff (like channels.scm) is in ~/.config/guix/
 
 #+CAPTION: To update this repository by fetching the config files from appropriate locations
 #+begin_src shell
 make
 #+end_src
+
+#+CAPTION: Link this repo's channel.scm file to your actual one
+#+begin_src shell
+
+ln -sf ~/guix-config/channels.scm ~/.config/guix/channels.scm
+
+#+end_src
+
+* Guix as your OS
 
 #+CAPTION: To reconfigure the system with my custom packages
 #+begin_src sh
