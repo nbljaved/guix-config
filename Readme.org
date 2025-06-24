@@ -172,3 +172,7 @@ You should periodically run the Nix garbage collector to get rid of unused packa
 #+end_src
 
 #+RESULTS:
+
+* Miscellaneous
+
+You can also search for exisiting package/service definitions at https://toys.whereis.social/.
