@@ -12,6 +12,13 @@ ln -sf ~/guix-config/channels.scm ~/.config/guix/channels.scm
 
 #+end_src
 
+* ./scripts
+./scripts/ is a folder that contains, you guessed it, useful scripts :)
+
+- To solve binaries breaking due to expectations of FHS:
+  * =./scripts/uv-guix-shell.sh= runs =uv= in a container with linux's File System Heirarchy (FHS)
+  * =./scripts/fix-foreign-binary.sh= fixes a binary that is failing due to Guix not abiding by the FHS
+
 * Guix as your OS
 
 #+CAPTION: To reconfigure the system with my custom packages
