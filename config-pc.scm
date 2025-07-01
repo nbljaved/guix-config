@@ -45,7 +45,38 @@
  xorg)
 
 (operating-system
- (kernel linux)
+ (kernel
+  ;; https://github.com/nonguix/nonguix#pinning-package-versions
+  ;;
+  ;; When using substitutes is not an option, you may find that guix
+  ;; system reconfigure recompiles the kernel frequently due to
+  ;; version bumps in the kernel package. An inferior can be used to
+  ;; pin the kernel version and avoid lengthy rebuilds.
+  (let*
+      ((channels
+        (list (channel
+               (name 'nonguix)
+               (url "https://gitlab.com/nonguix/nonguix")
+               (commit "57c186c44fdec1461af63286cb9442424ca8a0b2")
+               (introduction
+                (make-channel-introduction
+                 "897c1a470da759236cc11798f4e0a5f7d4d59fbc"
+                 (openpgp-fingerprint
+                  "2A39 3FFF 68F4 EF7A 3D29  12AF 6F51 20A0 22FB B2D5"))))
+              (channel
+               (name 'guix)
+               (url "https://git.guix.gnu.org/guix.git")
+               (commit "a88d6a45e422cede96d57d7a953439dc27c6a50c")
+               (introduction
+                (make-channel-introduction
+                 "9edb3f66fd807b096b48283debdcddccfea34bad"
+                 (openpgp-fingerprint
+                  "BBB0 2DDF 2CEA F6A8 0D1D  E643 A2A0 6DF2 A33A 54FA"))))))
+       (inferior
+        (inferior-for-channels channels)))
+    (first (lookup-inferior-packages inferior "linux" "6.14.11")))
+  ;; linux
+  )
  (initrd microcode-initrd)
  (firmware (list linux-firmware))
  (locale "en_IN.utf8")
@@ -106,7 +137,7 @@
  ;; services, run 'guix system search KEYWORD' in a terminal.
  (services
   (append (list (service xfce-desktop-service-type)
-		;; To configure OpenSSH, pass an 'openssh-configuration'
+                ;; To configure OpenSSH, pass an 'openssh-configuration'
                 ;; record as a second argument to 'service' below.
                 (service openssh-service-type
                          (openssh-configuration
@@ -133,11 +164,11 @@
 	  ;; This is the default list of services we
 	  ;; are appending to.
 	  (modify-services %desktop-services
-			   ;; enable wayland for gdm, gnome
+			   ;; can wayland for gdm, gnome
 			   (gdm-service-type config =>
-					     (gdm-configuration
-					      (inherit config)
-					      (wayland? #f)))
+			        	     (gdm-configuration
+			        	      (inherit config)
+			        	      (wayland? #f)))
 			   (elogind-service-type
 			    config =>
 			    (elogind-configuration
