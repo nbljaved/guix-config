@@ -166,9 +166,9 @@
 	  (modify-services %desktop-services
 			   ;; can wayland for gdm, gnome
 			   (gdm-service-type config =>
-			        	     (gdm-configuration
-			        	      (inherit config)
-			        	      (wayland? #f)))
+                                             (gdm-configuration
+                                              (inherit config)
+                                              (wayland? #f)))
 			   (elogind-service-type
 			    config =>
 			    (elogind-configuration
