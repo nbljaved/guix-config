@@ -18,6 +18,8 @@
  (gnu packages rust-apps)
  (gnu packages wm)
  (gnu services shepherd)
+ ;; https://lists.nongnu.org/archive/html/guix-patches/2022-02/msg00365.html
+ (gnu system file-systems)
  (nongnu packages linux)
  (nongnu packages firmware)
  (nongnu system linux-initrd)
@@ -98,8 +100,7 @@
                                         "audio" ;sound card
                                         "video" ;video devices such as webcams
                                         "input"
-                                        "docker"
-                                        )))
+                                        "docker")))
                %base-user-accounts))
 
  ;; Packages installed system-wide.  Users can also install packages
@@ -129,10 +130,9 @@
                          ;; sbcl-slynk
                          ;; `(,stumpwm "lib")
                          ;; sbcl-stumpwm-ttf-fonts
-                         xremap-x11
-                         )
+                         xremap-x11)
                    %base-packages))
- 
+
  ;; Below is the list of system services.  To search for available
  ;; services, run 'guix system search KEYWORD' in a terminal.
  (services
@@ -161,40 +161,38 @@
                           (using-pam? #t)
                           (using-setuid? #f)))
                 (service nix-service-type))
-	  ;; This is the default list of services we
-	  ;; are appending to.
-	  (modify-services %desktop-services
-			   ;; can wayland for gdm, gnome
-			   (gdm-service-type config =>
+          ;; This is the default list of services we
+          ;; are appending to.
+          (modify-services %desktop-services
+                           ;; can wayland for gdm, gnome
+                           (gdm-service-type config =>
                                              (gdm-configuration
                                               (inherit config)
                                               (wayland? #f)))
-			   (elogind-service-type
-			    config =>
-			    (elogind-configuration
-			     (inherit config)
-			     (handle-power-key 'suspend)))
-			   ;; enable substitute for nonguix - should help with large package eg: linux, firefox
-			   (guix-service-type config => (guix-configuration
-							 (inherit config)
-							 (substitute-urls
-							  (append
-							   (list
-							    "https://substitutes.nonguix.org")
-							   %default-substitute-urls))
-							 (authorized-keys
-							  (append
-							   (list
-							    (local-file
-							     "./signing-key.pub"))
-							   %default-authorized-guix-keys)))))))
+                           (elogind-service-type
+                            config =>
+                            (elogind-configuration
+                             (inherit config)
+                             (handle-power-key 'suspend)))
+                           ;; enable substitute for nonguix - should help with large package eg: linux, firefox
+                           (guix-service-type config => (guix-configuration
+                                                         (inherit config)
+                                                         (substitute-urls
+                                                          (append
+                                                           (list
+                                                            "https://substitutes.nonguix.org")
+                                                           %default-substitute-urls))
+                                                         (authorized-keys
+                                                          (append
+                                                           (list
+                                                            (local-file
+                                                             "./signing-key.pub"))
+                                                           %default-authorized-guix-keys)))))))
  (bootloader (bootloader-configuration
               (bootloader grub-efi-bootloader)
               (targets (list "/boot/efi"))
               (keyboard-layout keyboard-layout)))
- (swap-devices (list (swap-space
-                      (target (uuid
-                               "27b860cf-aa15-4be6-b08f-6592fc8f0dc8")))))
+
 
  ;; The list of file systems that get "mounted".  The unique
  ;; file system identifiers there ("UUIDs") can be obtained
@@ -209,4 +207,23 @@
                        (device (uuid
                                 "41a31ef0-566b-4496-99aa-e4ce821def30"
                                 'ext4))
-                       (type "ext4")) %base-file-systems)))
+                       (type "ext4")) %base-file-systems))
+
+ ;; https://guix.gnu.org/manual/devel/en/html_node/Swap-Space.html
+ (swap-devices (list (swap-space
+                      (target (uuid
+                               "27b860cf-aa15-4be6-b08f-6592fc8f0dc8")))
+                     (swap-space (target "/swapfile")
+                                 (dependencies (filter (file-system-mount-point-predicate "/")
+                                                       file-systems)))))
+
+ ;; Enables the swap file /swapfile for hibernation by telling the kernel about
+ ;; the partition containing it (resume argument) and its offset on that
+ ;; partition (resume_offset argument)
+ ;;
+ ;; See https://guix.gnu.org/manual/devel/en/html_node/Swap-Space.html to
+ ;; understand how to get these values
+ (kernel-arguments
+  (cons* "resume=/dev/nvme0n1p3"         ;device that holds /swapfile
+         "resume_offset=122318848"       ;offset of /swapfile on device
+         %default-kernel-arguments)))
