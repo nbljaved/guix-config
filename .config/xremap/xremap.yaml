@@ -78,3 +78,5 @@ keymap:
           u: [C-z, { set_mark: false }]
           # select all
           C-p: C-a
+      C-Shift-x: C-x
+
