@@ -11,7 +11,7 @@ modmap:
 keymap:
   - name: Emacs bindings
     application:
-      not: [/(?i)emacs/, /(?i)kitty/, /(?i)code/, /(?i)flameshot/, ]
+      not: [/(?i)emacs/, /(?i)kitty/, /(?i)code/, /(?i)flameshot/, /(?i)ptyxis/, ]
       #only: [google-chrome.Google-chrome, /(?i)librewolf/]
     remap:
       C-q: { escape_next_key: true }
