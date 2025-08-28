@@ -41,3 +41,15 @@ endif
 echo:
 	echo $(HOSTNAME) > /dev/null
 	echo $(GUIX_SYSTEM) > /dev/null
+
+distrobox: build-arch-image run-arch-image-w-distrobox
+
+build-arch-image:
+	podman build -t localhost/arch ./.config/distrobox
+
+run-arch-image-w-distrobox:
+	distrobox create \
+          --volume /gnu:/gnu/ \
+          --volume /var/guix:/var/guix \
+          --image localhost/arch \
+          --name arch

@@ -1,0 +1,21 @@
+
+#+caption: Build the image
+#+begin_src sh
+podman build -t localhost/arch .
+#+end_src
+
+We mount some Guix specific volumes for Guix integration
+
+#+caption: Run the container
+#+begin_src sh
+distrobox create \
+          --volume /gnu:/gnu/ \
+          --volume /var/guix:/var/guix \
+          --image localhost/arch \
+          --name arch
+#+end_src
+
+#+caption: Connect to the container
+#+begin_src sh
+distrobox enter arch
+#+end_src
