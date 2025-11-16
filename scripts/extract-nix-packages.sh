@@ -40,6 +40,10 @@ echo "Found packages: ${sorted_names[*]}"
 cat > "$OUTPUT_FILE" << EOF
 # Installation: nix-env --install --remove-all --file ./nix-config/attribute-manifest.nix
 # Generated from manifest.nix on $(date)
+#
+# To specify package versions, you can use overrideAttrs:
+#   (pkgs.bun.overrideAttrs (old: { version = "1.3.2"; }))
+#
 { pkgs ? import <nixos-unstable> {} }:
 
 [

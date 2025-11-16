@@ -1,5 +1,6 @@
 HOSTNAME := $(shell hostname)
 GUIX_SYSTEM := $(shell grep '^ID=guix' /etc/os-release)
+NIX := $(shell command -v nix >/dev/null 2>&1 && echo nix)
 
 all: sync
 
@@ -16,9 +17,12 @@ ifeq ($(HOSTNAME), pc)
 else
 	# not pc
 endif
+	@echo ""
 # cat /etc/xremap.yaml > xremap.yaml
+	# Guix: Configure channels
 	ln -sf ~/guix-config/channels.scm ~/.config/guix/channels.scm
-	# TODO: The following command doesn't work:
+	# Guix: Get current profile
+	# The following command doesn't work:
 	# guile ./scripts/sort-manifest.scm  current-profile-manifest > current-profile-manifest
 	#
 	# Can't read from same file as bash due to the 'redirection'
@@ -28,19 +32,24 @@ endif
 	#
 	# guile ./scripts/sort-manifest.scm  current-profile-manifest | sponge current-profile-manifest
 	guile ./scripts/sort-manifest.scm > current-profile-manifest
+	@echo ""
 
 nix:
-ifdef GUIX_SYSTEM
-	mkdir -p nix-config
-	cat ~/.nix-channels > ./nix-config/nix-channels
+ifdef NIX
+	# Nix: Configure channels
+	ln -sf ~/guix-config/nix-config/nix-channels ~/.nix-channels
+	# Nix: Get current profile
 	cat ~/.nix-profile/manifest.nix > ./nix-config/manifest.nix
+	bash ./scripts/extract-nix-packages.sh
 else
 	# Not a Guix system, therefore no nix-service-type
 endif
+	@echo ""
 
 echo:
 	echo $(HOSTNAME) > /dev/null
 	echo $(GUIX_SYSTEM) > /dev/null
+	echo $(NIX) > /dev/null
 
 distrobox: build-arch-image run-arch-image-w-distrobox
 
