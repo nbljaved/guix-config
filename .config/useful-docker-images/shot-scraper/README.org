@@ -2,82 +2,40 @@
 
 This Dockerfile provides a containerized version of [[https://github.com/simonw/shot-scraper][shot-scraper]], a tool for taking screenshots of web pages using Playwright.
 
-** Building the Image
+** Setup and Installation
 
+#+CAPTION: Build the container and set up the shot-scraper wrapper script
 #+begin_src shell
-make build
-# or
-make all
+make
 #+end_src
 
-** Running with Docker/Podman
+This will:
+- Build the Docker/Podman image for shot-scraper
+- Create the wrapper script at =bin/shot-scraper= that provides seamless access
+- Set up the Claude skill for shot-scraper functionality
+- Automatically check if shot-scraper is available on PATH
 
-*** Basic Usage
-
+#+CAPTION: Check if shot-scraper is properly available on your PATH
 #+begin_src shell
-# Run shot-scraper help
-docker run --rm shot-scraper
-
-# Take a screenshot of a website
-docker run --rm --network host -v $(pwd)/screenshots:/screenshots shot-scraper https://example.com
-
-# Take screenshot of localhost service (requires --network host)
-docker run --rm --network host -v $(pwd)/screenshots:/screenshots shot-scraper http://localhost:8000
-
-# Explicitly run shot-scraper command
-docker run --rm shot-scraper shot-scraper --help
+make check
 #+end_src
 
-*** Using Podman
+The check command will:
+- Confirm if shot-scraper is accessible on your PATH
+- Show the current version if available
+- Provide instructions for adding it to PATH if not found
 
-If you prefer podman over docker, the Makefile will automatically detect and use podman:
+** Using the Wrapper Script
 
+The setup creates a wrapper script at =bin/shot-scraper= that automatically detects and uses Docker or Podman with proper networking and volume mounts.
+
+#+CAPTION: Add the wrapper script to your PATH
 #+begin_src shell
-# The same commands work with podman
-podman run --rm shot-scraper --help
+# Add this to your ~/.bashrc, ~/.zshrc, or other shell configuration
+export PATH="~/guix-config/.config/useful-docker-images/shot-scraper/bin:$$PATH"
 #+end_src
 
-** Setting up a Bash Alias
-
-To make the =shot-scraper= command available system-wide through the container, add this alias to your shell configuration (=~/.bashrc=, =~/.zshrc=, etc.):
-
-*** Docker Version
-
-Add to your =~/.bashrc= or =~/.zshrc=:
-
-#+begin_src shell
-alias shot-scraper='docker run --rm --network host -v "$HOME:$HOME" -w "$(pwd)" shot-scraper shot-scraper'
-#+end_src
-
-*** Podman Version
-
-If using podman:
-
-#+begin_src shell
-alias shot-scraper='podman run --rm --network host -v "$HOME:$HOME" -w "$(pwd)" shot-scraper shot-scraper'
-#+end_src
-
-*** Auto-detecting Version
-
-For automatic detection between docker and podman:
-
-#+begin_src shell
-shot_scraper_cmd() {
-    if command -v docker >/dev/null 2>&1; then
-        docker run --rm --network host -v "$HOME:$HOME" -w "$(pwd)" shot-scraper shot-scraper "$@"
-    elif command -v podman >/dev/null 2>&1; then
-        podman run --rm --network host -v "$HOME:$HOME" -w "$(pwd)" shot-scraper shot-scraper "$@"
-    else
-        echo "Error: Neither docker nor podman found"
-        return 1
-    fi
-}
-alias shot-scraper=shot_scraper_cmd
-#+end_src
-
-** Usage Examples with Alias
-
-After adding the alias and reloading your shell (=source ~/.bashrc=), you can use shot-scraper just like the native command:
+After adding to PATH and reloading your shell (=source ~/.bashrc=), you can use shot-scraper directly:
 
 #+begin_src shell
 # Show help
@@ -86,9 +44,31 @@ shot-scraper --help
 # Take single screenshot
 shot-scraper https://example.com
 
-# Take multiple screenshots with configuration file
-shot-scraper shots.yml
+# Take screenshot of localhost service
+shot-scraper http://localhost:8000
 
 # Take screenshot with custom options
 shot-scraper https://example.com -w 1200 -h 800 -o screenshot.png
+
+# Take multiple screenshots with configuration file
+shot-scraper shots.yml
 #+end_src
+
+** Manual Docker/Podman Usage
+
+If you prefer to run the container directly without the wrapper:
+
+#+begin_src shell
+# Run shot-scraper help
+docker run --rm shot-scraper
+
+# Take screenshot of localhost service (requires --network host)
+docker run --rm --network host -v "$HOME:$HOME" -w "$(pwd)" shot-scraper shot-scraper http://localhost:8000
+
+# Using podman (same commands work)
+podman run --rm --network host -v "$HOME:$HOME" -w "$(pwd)" shot-scraper shot-scraper http://localhost:8000
+#+end_src
+
+** Claude Skill Integration
+
+The setup also creates a symbolic link to make shot-scraper available as a Claude skill, allowing you to use shot-scraper functionality directly through Claude Code with enhanced capabilities for web scraping and screenshot automation.

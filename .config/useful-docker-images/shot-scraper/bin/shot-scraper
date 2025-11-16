@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+# Shot-scraper wrapper script for Docker/Podman
+# This script allows running shot-scraper through a container with proper networking and volume mounts
+
+# Function to detect available container runtime
+detect_runtime() {
+    if command -v docker >/dev/null 2>&1; then
+        echo "docker"
+    elif command -v podman >/dev/null 2>&1; then
+        echo "podman"
+    else
+        echo "Error: Neither docker nor podman found" >&2
+        exit 1
+    fi
+}
+
+# Get the container runtime
+RUNTIME=$(detect_runtime)
+
+# Run shot-scraper in container with host networking and home directory mounted
+exec "$RUNTIME" run --rm --network host -v "$HOME:$HOME" -w "$(pwd)" shot-scraper shot-scraper "$@"
