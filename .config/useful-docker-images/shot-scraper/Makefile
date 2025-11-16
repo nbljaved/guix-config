@@ -9,8 +9,8 @@ build:
 	@echo ""
 
 skill:
-	mkdir -p $(HOME)/.claude/skills
-	ln -sf $(HOME)/guix-config/.config/useful-docker-images/shot-scraper/claude-skills/shot-scraper.md $(HOME)/.claude/skills/shot-scraper.md
+	mkdir -p $(HOME)/.claude/skills/screenshot
+	ln -sf $(HOME)/guix-config/.config/useful-docker-images/shot-scraper/claude-skills/shot-scraper.md $(HOME)/.claude/skills/screenshot/SKILL.md
 	@echo ""
 
 check:
