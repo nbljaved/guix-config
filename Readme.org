@@ -29,7 +29,7 @@ sudo guix system reconfigure /etc/config.scm
 
 #+end_src
 
-* Guix Home
+* TODO Guix Home
 https://guix.gnu.org/manual/devel/en/html_node/Declaring-the-Home-Environment.html
 
 #+CAPTION: To set it up
@@ -56,6 +56,11 @@ guix home container path-to-home-config.scm
 * Nix
 I use Nix for packages that aren't currently available in Guix, or those I might need at a moments notice.
 
+** Install Nix in non-guix linux distro
+https://nix.dev/manual/nix/2.28/installation/index.html
+https://nix.dev/manual/nix/2.28/quick-start.html
+
+** Install Nix in Guix system
 #+CAPTION: Enable nix service in Guix
 (see [[https://guix.gnu.org/manual/en/html_node/Miscellaneous-Services.html][Guix Miscellaneous Services]])
 #+begin_src lisp :eval no
@@ -85,7 +90,7 @@ nix-channel --list
 
 # Adding a primary channel
 nix-channel --add https://nixos.org/channels/channel-name nixos
-# For eg: nix-channel --add https://nixos.org/channels/nixos-25.05 nixpkgs
+# For eg: nix-channel --add https://nixos.org/channels/nixos-25.05 nixos
 
 # Adding other channels
 nix-channel --add https://some.channel/url my-alias
@@ -103,8 +108,8 @@ nix-channel --update
 # want to update channels and rebuild, you can use nixos-rebuild with
 # the --upgrade flag to do both in one step.
 
-# Also need to load the nixpkgs channel
-nix-channel --add channel-url nixpkgs
+# Also need to load the <attribnute-name> channel
+nix-channel --add channel-url <attribute-name>
 #+end_src
 
 ** nix-env cheatsheet
@@ -129,7 +134,7 @@ nix-env -q search_term
 nix-env -qa search_term
 
 # Install package:
-nix-env -iA nixpkgs.pkg_name
+nix-env -iA nixos.pkg_name
 
 # Install a package from a URL:
 nix-env -i pkg_name --file example.com
@@ -152,7 +157,7 @@ nix-env -u
 nix-env --query --available --attr-path
 
 # Install a package from the channel
-nix-env --install --attr nixpkgs.hello
+nix-env --install --attr nixos.hello
 
 # Uninstall a package:
 nix-env --uninstall hello
@@ -161,7 +166,7 @@ nix-env --uninstall hello
 nix-shell --packages hello
 
 # To keep up-to-date with the channel, do:
-nix-channel --update nixpkgs
+nix-channel --update nixos
 nix-env --upgrade '*'
 
 # The latter command will upgrade each installed package for which
@@ -182,4 +187,4 @@ You should periodically run the Nix garbage collector to get rid of unused packa
 
 * Miscellaneous
 
-You can also search for exisiting package/service definitions at https://toys.whereis.social/.
+You can also search for third-party Guix package/service definitions at https://toys.whereis.social/.

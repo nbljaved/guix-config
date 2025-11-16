@@ -2,6 +2,7 @@
 #+caption: Build the image
 #+begin_src sh
 podman build -t localhost/arch .
+# podman build --no-cache -t localhost/arch .
 #+end_src
 
 We mount some Guix specific volumes for Guix integration

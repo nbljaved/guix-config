@@ -66,6 +66,7 @@
         "guile-hall"
         "guile-readline"
         "htop"
+        "jq"
         "kitty"
         "kmonad"
         "ktouch"
