@@ -11,7 +11,6 @@
   pkgs.gh
   pkgs.hello
   pkgs.kitty
-  pkgs.shot-scraper
   pkgs.tinymist
   pkgs.uv
 ]

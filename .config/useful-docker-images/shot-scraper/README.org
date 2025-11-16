@@ -1,0 +1,94 @@
+* Shot Scraper Docker Container
+
+This Dockerfile provides a containerized version of [[https://github.com/simonw/shot-scraper][shot-scraper]], a tool for taking screenshots of web pages using Playwright.
+
+** Building the Image
+
+#+begin_src shell
+make build
+# or
+make all
+#+end_src
+
+** Running with Docker/Podman
+
+*** Basic Usage
+
+#+begin_src shell
+# Run shot-scraper help
+docker run --rm shot-scraper
+
+# Take a screenshot of a website
+docker run --rm --network host -v $(pwd)/screenshots:/screenshots shot-scraper https://example.com
+
+# Take screenshot of localhost service (requires --network host)
+docker run --rm --network host -v $(pwd)/screenshots:/screenshots shot-scraper http://localhost:8000
+
+# Explicitly run shot-scraper command
+docker run --rm shot-scraper shot-scraper --help
+#+end_src
+
+*** Using Podman
+
+If you prefer podman over docker, the Makefile will automatically detect and use podman:
+
+#+begin_src shell
+# The same commands work with podman
+podman run --rm shot-scraper --help
+#+end_src
+
+** Setting up a Bash Alias
+
+To make the =shot-scraper= command available system-wide through the container, add this alias to your shell configuration (=~/.bashrc=, =~/.zshrc=, etc.):
+
+*** Docker Version
+
+Add to your =~/.bashrc= or =~/.zshrc=:
+
+#+begin_src shell
+alias shot-scraper='docker run --rm --network host -v "$HOME:$HOME" -w "$(pwd)" shot-scraper shot-scraper'
+#+end_src
+
+*** Podman Version
+
+If using podman:
+
+#+begin_src shell
+alias shot-scraper='podman run --rm --network host -v "$HOME:$HOME" -w "$(pwd)" shot-scraper shot-scraper'
+#+end_src
+
+*** Auto-detecting Version
+
+For automatic detection between docker and podman:
+
+#+begin_src shell
+shot_scraper_cmd() {
+    if command -v docker >/dev/null 2>&1; then
+        docker run --rm --network host -v "$HOME:$HOME" -w "$(pwd)" shot-scraper shot-scraper "$@"
+    elif command -v podman >/dev/null 2>&1; then
+        podman run --rm --network host -v "$HOME:$HOME" -w "$(pwd)" shot-scraper shot-scraper "$@"
+    else
+        echo "Error: Neither docker nor podman found"
+        return 1
+    fi
+}
+alias shot-scraper=shot_scraper_cmd
+#+end_src
+
+** Usage Examples with Alias
+
+After adding the alias and reloading your shell (=source ~/.bashrc=), you can use shot-scraper just like the native command:
+
+#+begin_src shell
+# Show help
+shot-scraper --help
+
+# Take single screenshot
+shot-scraper https://example.com
+
+# Take multiple screenshots with configuration file
+shot-scraper shots.yml
+
+# Take screenshot with custom options
+shot-scraper https://example.com -w 1200 -h 800 -o screenshot.png
+#+end_src
