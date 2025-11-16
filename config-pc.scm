@@ -17,9 +17,12 @@
  (gnu packages lisp-xyz)
  (gnu packages rust-apps)
  (gnu packages wm)
+ (gnu packages virtualization)
+ (gnu packages rsync)
  (gnu services shepherd)
  ;; https://lists.nongnu.org/archive/html/guix-patches/2022-02/msg00365.html
  (gnu system file-systems)
+ (gnu system accounts)                  ; for 'subuid-range'
  (nongnu packages linux)
  (nongnu packages firmware)
  (nongnu system linux-initrd)
@@ -30,6 +33,7 @@
 (use-package-modules
  curl
  docker
+ containers
  emacs
  fonts
  lisp
@@ -41,6 +45,8 @@
  databases
  desktop
  docker
+ dbus
+ containers
  networking
  nix
  ssh
@@ -54,30 +60,30 @@
   ;; system reconfigure recompiles the kernel frequently due to
   ;; version bumps in the kernel package. An inferior can be used to
   ;; pin the kernel version and avoid lengthy rebuilds.
-  (let*
-      ((channels
-        (list (channel
-               (name 'nonguix)
-               (url "https://gitlab.com/nonguix/nonguix")
-               (commit "57c186c44fdec1461af63286cb9442424ca8a0b2")
-               (introduction
-                (make-channel-introduction
-                 "897c1a470da759236cc11798f4e0a5f7d4d59fbc"
-                 (openpgp-fingerprint
-                  "2A39 3FFF 68F4 EF7A 3D29  12AF 6F51 20A0 22FB B2D5"))))
-              (channel
-               (name 'guix)
-               (url "https://git.guix.gnu.org/guix.git")
-               (commit "a88d6a45e422cede96d57d7a953439dc27c6a50c")
-               (introduction
-                (make-channel-introduction
-                 "9edb3f66fd807b096b48283debdcddccfea34bad"
-                 (openpgp-fingerprint
-                  "BBB0 2DDF 2CEA F6A8 0D1D  E643 A2A0 6DF2 A33A 54FA"))))))
-       (inferior
-        (inferior-for-channels channels)))
-    (first (lookup-inferior-packages inferior "linux" "6.14.11")))
-  ;; linux
+  ;; (let*
+  ;;     ((channels
+  ;;       (list (channel
+  ;;              (name 'nonguix)
+  ;;              (url "https://gitlab.com/nonguix/nonguix")
+  ;;              (commit "57c186c44fdec1461af63286cb9442424ca8a0b2")
+  ;;              (introduction
+  ;;               (make-channel-introduction
+  ;;                "897c1a470da759236cc11798f4e0a5f7d4d59fbc"
+  ;;                (openpgp-fingerprint
+  ;;                 "2A39 3FFF 68F4 EF7A 3D29  12AF 6F51 20A0 22FB B2D5"))))
+  ;;             (channel
+  ;;              (name 'guix)
+  ;;              (url "https://git.guix.gnu.org/guix.git")
+  ;;              (commit "a88d6a45e422cede96d57d7a953439dc27c6a50c")
+  ;;              (introduction
+  ;;               (make-channel-introduction
+  ;;                "9edb3f66fd807b096b48283debdcddccfea34bad"
+  ;;                (openpgp-fingerprint
+  ;;                 "BBB0 2DDF 2CEA F6A8 0D1D  E643 A2A0 6DF2 A33A 54FA"))))))
+  ;;      (inferior
+  ;;       (inferior-for-channels channels)))
+  ;;   (first (lookup-inferior-packages inferior "linux" "6.14.11")))
+  linux
   )
  (initrd microcode-initrd)
  (firmware (list linux-firmware))
@@ -100,7 +106,9 @@
                                         "audio" ;sound card
                                         "video" ;video devices such as webcams
                                         "input"
-                                        "docker")))
+                                        "cgroup" ;Adding the account to the "cgroup" group makes it possible to run podman commands.
+                                        ;; "docker"
+                                        )))
                %base-user-accounts))
 
  ;; Packages installed system-wide.  Users can also install packages
@@ -108,8 +116,15 @@
  ;; for packages and 'guix install PACKAGE' to install a package.
  (packages (append (list curl
                          ;; docker
-                         docker-cli
-                         docker-compose
+                         ;; docker-cli
+                         ;; docker-compose
+                         ;;
+                         ;; podman
+                         podman
+                         podman-compose
+                         ;;
+                         incus
+                         rsync
                          ;;
                          emacs
                          font-dejavu
@@ -148,10 +163,21 @@
                          (bluetooth-configuration
                           (auto-enable? #t)))
                 (service cups-service-type)
-                (service docker-service-type)
+                ;; The iptables-service-type is required for Podman to be able
+                ;; to setup its own networks.
+                ;; (service dbus-root-service-type) ; part of %desktop-services
+                ;; (service dhcpcd-service-type)
+                (service iptables-service-type)
+                (service rootless-podman-service-type
+                         (rootless-podman-configuration
+                          (subgids
+                           (list (subid-range (name "nabeel"))))
+                          (subuids
+                           (list (subid-range (name "nabeel"))))))
+                ;; (service docker-service-type)
                 ;; Have to manually add containerd service to use in docker.
                 ;; https://lists.nongnu.org/archive/html/guix-patches/2024-06/msg00177.html
-                (service containerd-service-type)
+                ;; (service containerd-service-type)
                 (set-xorg-configuration
                  (xorg-configuration (keyboard-layout keyboard-layout)))
                 (service screen-locker-service-type
@@ -224,6 +250,6 @@
  ;; See https://guix.gnu.org/manual/devel/en/html_node/Swap-Space.html to
  ;; understand how to get these values
  (kernel-arguments
-  (cons* "resume=/dev/nvme0n1p3"         ;device that holds /swapfile
-         "resume_offset=122318848"       ;offset of /swapfile on device
+  (cons* "resume=/dev/nvme0n1p3"        ;device that holds /swapfile
+         "resume_offset=122318848"      ;offset of /swapfile on device
          %default-kernel-arguments)))
