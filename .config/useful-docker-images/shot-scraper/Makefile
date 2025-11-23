@@ -5,10 +5,12 @@ DOCKER := $(shell command -v docker 2>/dev/null || echo podman)
 all: build skill check
 
 build:
+	# Build shot-scraper image
 	$(DOCKER) build -t shot-scraper .
 	@echo ""
 
 skill:
+	# Add screenshot skill to Claude Code
 	mkdir -p $(HOME)/.claude/skills/screenshot
 	ln -sf $(HOME)/guix-config/.config/useful-docker-images/shot-scraper/claude-skills/shot-scraper.md $(HOME)/.claude/skills/screenshot/SKILL.md
 	@echo ""
