@@ -13,7 +13,7 @@ The EFI partition (=nvme0n1p1=, UUID =9591-0188=) and the swap partition (=nvme0
 
 | Phase | Where                       | What                                              | Time          |
 |-------+-----------------------------+---------------------------------------------------+---------------|
-| [[*Phase 1 — Save everything (current system)][1]]     | current system              | commit/push, encrypted backups, prep config, USB | 1–2 h, hands-on |
+| [[*Phase 1 — Save everything (current system)][1]]     | current system              | commit/push, carry 4 secrets out, prep config, USB | 1–2 h, hands-on |
 | [[*Phase 2 — Install from the live USB][2]]     | live USB                    | format =nvme0n1p3=, install                        | 1–2 h, mostly waiting |
 | [[*Phase 3 — First boot and restore][3]]     | new system                  | passwords, keys, repos, profiles, data            | 1–3 h         |
 
@@ -35,7 +35,7 @@ Your daemon is running guix =520785e= from 2026-03-09, which is *unpatched* agai
 ** Rules for this file
 - Every code block has =:eval no=, so =C-c C-c= will not run anything. Copy commands on purpose.
 - Blocks marked *DESTRUCTIVE* erase data. Read them twice.
-- *This file must survive the wipe.* Commit and push it (GitHub renders =.org= files, so you can read it on your phone), *and* copy it to the backup drive.
+- *This file must survive the wipe.* Commit and push it — GitHub renders =.org= files, so you can read it on your phone while the disk is being erased. With no backup drive (D3), that push is the only copy.
 
 ** Machine state when this was written (2026-09-21 ~19:00)
 - *Half-migrated daemon.* =/gnu/store= is owned by =root root= because the privileged-mode reconfigure ran at 18:47. But the *old* daemon is still running as uid 958 (=guix-daemon=) without =--build-users-group=. It cannot write the root-owned store, so every build fails until a reboot. That is fixed by [[*1.0 Reboot once][step 1.0]].
@@ -52,7 +52,7 @@ Only if you change your mind:
 4. The final =reconfigure=: either build everything from source (very long, kernel included), or hand-run the freshly pulled =~/.config/guix/current/bin/guix-daemon= (its =GUIX= points to the patched substituter) and use substitutes. The second route is fiddly.
 5. Revert the TEMP lines, reconfigure, reboot.
 
-The reinstall trades those unattended hours, and the fiddly step 4, for about 1–2 h of careful backup work.
+The reinstall trades those unattended hours, and the fiddly step 4, for about 1–2 h of careful pushing and checking (Phase 1).
 
 * Decisions to make before starting
 ** D1 — daemon mode after the reinstall
@@ -64,11 +64,23 @@ The reinstall trades those unattended hours, and the fiddly step 4, for about 1�
 - *A (recommended):* keep the partition table. Reformat only =nvme0n1p3= with the label =guix-root=.
 - *B (optional):* split =nvme0n1p3= into root (~350 GiB) and a separate =/home= (the rest), so the next reinstall can leave =/home= untouched. It adds steps in [[*2.5 Partition and format — DESTRUCTIVE][2.5]] and one =file-system= entry.
 
-** D3 — backup medium
-- An external drive with at least *20 GB* free. The home archive is roughly 12–15 GB before compression.
-- One *age passphrase* protects both archives. The archives contain your SSH and age private keys. *Write the passphrase on paper.* Without it the backup is useless.
-- If the drive is FAT32 (=vfat= in =df -T=), no single file can exceed 4 GiB. Use the =split= variant in [[*1.6 Back up home (encrypted)][1.6]].
-- *Don't copy the T460's choice here.* The T460 ran with no backup at all (its D8), and that was nearly free because this machine still held a second copy of everything. Nothing holds a second copy of *this* machine: =~/.age/key= (which decrypts the diary), =~/.claude= 258M, =~/.librewolf= 1.1G, =~/.telega= 369M, Chrome's profile, =~/Calibre Library=, =~/Downloads/brilliant-cv= and the loose files in =~= all exist only here. The full survey is in =REINSTALL-thinkpad.org=, Appendix F.
+** D3 — Backups: none (chosen 2026-10-04)
+- *No backup drive, the same bet the T460 made (its D8): only what is in a git repo survives.* So the old 1.6/1.7/1.8 are gone — 1.6 now carries four secrets off the machine, 1.7 lists what is being let go, and 1.8 checks you can still get back in.
+- *The asymmetry worth understanding.* When the T460 was wiped, this machine still held a second copy of its small secrets. Nothing holds a second copy of /this/ machine — except that the T460 now exists, is installed and is staying. That makes it the place to park the few unrecoverable things.
+- *=git push= is the backup.* Step 1.1 and [[*1.5 Re-run the at-risk survey][1.5]] stop being formalities: Phase 3 clones fresh from GitHub, so anything uncommitted, unpushed or stashed is deleted. Stashes live in =.git= and never travel, and a patch file in =$HOME= is no longer a rescue.
+- *Accepted losses*, with eyes open (sizes measured 2026-10-04):
+| What                                                                     | Size  | What it costs                                                     |
+|--------------------------------------------------------------------------+-------+-------------------------------------------------------------------|
+| =~/.claude= (incl. this project's memory), =~/.gemini=, =~/.zai=, opencode      | 265M  | AI tool history, settings, credentials                            |
+| =~/.librewolf=, =~/.config/google-chrome=                                    | 2.7G  | sessions; bookmarks and passwords unless Chrome sync has them     |
+| =~/.telega=, =~/.local/share/TelegramDesktop=                                | 369M  | Telegram sessions; re-login from the phone                        |
+| =~/.roswell=, =~/quicklisp=                                                  | 178M  | rebuildable: =~/.stumpwm.d/bootstrap-quicklisp.sh= (3.9)            |
+| =~/Calibre Library=, =~/.config/calibre=                                     | 2.5M  | the e-book library. Small enough to commit instead                |
+| =~/Downloads= (=test=, loose documents)                                      | ~200M | scratch work and saved files                                      |
+| =~/.bash_history=, =~/.org-timestamps=, =~/.fehbg=, =~/.local/share/fonts=       | ~104M | history, publish timestamps, wallpaper line, user fonts           |
+| =~/.mullvad=, =~/.pki=, =~/.android=, =~/.ipython=, =~/.config/{hypr,mpv,xfce4}= | ~40M  | VPN and tool state. The Mullvad account number is in 1.6          |
+| SSH host keys, =/var/lib/tailscale=, NM profiles                           | small | other hosts warn once, a new tailnet node, retyped Wi-Fi (3.11)   |
+- If you change your mind, the encrypted-archive recipe is still written out in =REINSTALL-thinkpad.org= step 1.3. It wants a drive with 20 GB free and an =age= passphrase on paper.
 
 ** D4 — network during the install
 - Plug an *Ethernet cable* into the onboard port. The installer can't use your Wi-Fi.
@@ -85,7 +97,7 @@ ls -ld /gnu/store                                # expect: root root
 #+end_src
 
 ** TODO 1.1 Git repos: commit, push, rescue [0/10]
-Snapshot of what is at risk (the survey script is in [[*C. At-risk survey script][Appendix C]]). The backup in 1.6 also preserves all of this, stashes included, because they live in =.git=. Pushing matters because Phase 3 *clones fresh*.
+Snapshot of what is at risk (the survey script is in [[*C. At-risk survey script][Appendix C]]). With no backup ([[*D3 — Backups: none (chosen 2026-10-04)][D3]]) this table /is/ the backup plan: Phase 3 *clones fresh* from GitHub, so anything not pushed is deleted — stashes included, because they live in =.git= and never travel.
 
 | Repo                                    | At risk                                                                                          | Action                                             |
 |-----------------------------------------+--------------------------------------------------------------------------------------------------+----------------------------------------------------|
@@ -96,9 +108,9 @@ Snapshot of what is at risk (the survey script is in [[*C. At-risk survey script
 | =~/Documents/personal/personal-documents= | =resume/typst-grotesk-cv/ai-project.md= modified; 8 untracked entries (appraisal PDFs, =ai-project.tex/.pdf=, =ats-lab/=, =chatbot.md=, minted cache, stray file =tyle.cursort increase s=) | delete the stray file; commit what you want        |
 | ↳ submodule =jobs/natsoft/natsoft-activities= | untracked =activities.md=                                                                | commit + push *inside the submodule first*, then commit the pointer in the parent |
 | =~/Documents/leetcode=                  | 1 stash (2026-04-10 "list comprehension")                                                        | rescue stash                                       |
-| =~/.stumpwm.d=                          | 1 stash (2025-08-31 blueman-applet); ignored =winner-layouts/=, =history=                        | rescue stash; ignored files go in the backup       |
-| =~/Downloads/brilliant-cv=              | *NO REMOTE*: 1 local commit + 4 modified + 28 untracked (CV =.typ= sources, PDFs, logos)         | push to a new private repo, or rely on the backup |
-| =~/Downloads/test=                      | *NO REMOTE*, 0 commits, ~1,000 untracked files (CSV, site assets, marimo), 49 MB without =.venv= | backup only                                        |
+| =~/.stumpwm.d=                          | 1 stash (2025-08-31 blueman-applet); ignored =winner-layouts/=, =history=                        | rescue stash; the ignored files are an accepted loss |
+| =~/Downloads/brilliant-cv=              | *handled 2026-10-04*: its files (without =.git=) are committed as =personal-documents/resume-papa= (=e983dc0=) | push =personal-documents=; the leftover =.git= in Downloads can be deleted |
+| =~/Downloads/test=                      | *NO REMOTE*, 0 commits, ~1,000 untracked files (CSV, site assets, marimo), 49 MB without =.venv= | accepted loss (D3), or give it a private repo      |
 | =islam=, =diary=, =org/roam=, =nonguix=, =smolagents=, submodules | nothing                                                               | —                                                  |
 
 - [ ] =~/guix-config=: handled in 1.3 / 1.4
@@ -110,7 +122,7 @@ Snapshot of what is at risk (the survey script is in [[*C. At-risk survey script
 - [ ] =personal-documents=: commit (incl. the submodule pointer) + push
 - [ ] =~/Documents/leetcode=: stash rescued
 - [ ] =~/.stumpwm.d=: stash rescued
-- [ ] =~/Downloads/brilliant-cv=: pushed, or consciously left to the backup
+- [ ] =~/Downloads/brilliant-cv=: moved into =personal-documents/resume-papa= on 2026-10-04 — push that repo
 
 Rescuing a stash — option A keeps it on the remote as a branch. Commit your normal work first so the working tree is clean:
 #+begin_src sh
@@ -121,18 +133,15 @@ git add -A && git commit -m "rescued stash: <message>" && git push -u origin res
 git switch -                                     # back to your branch; repeat with stash@{0} for the next one
 #+end_src
 
-Option B exports every stash as a patch into =$HOME=, where the backup picks it up:
+Option A is now the *only* rescue: with no drive, a patch file in =$HOME= dies with the disk. If you want the patches as files rather than branches, they still have to end up inside a repo that you push:
 #+begin_src sh
-r=$(basename "$PWD"); n=$(git stash list | wc -l)
-for i in $(seq 0 $((n-1))); do git stash show -p "stash@{$i}" > "$HOME/stash-$r-$i.patch"; done
+r=$(basename "$PWD"); n=$(git stash list | wc -l); mkdir -p ~/guix-config/other/stashes
+for i in $(seq 0 $((n-1))); do git stash show -p "stash@{$i}" > ~/guix-config/other/stashes/"$r-$i.patch"; done
+cd ~/guix-config && git add other/stashes && git commit -m "rescued stashes as patches" && git push
 #+end_src
+There were *10 stashes* on 2026-10-04: 5 in =.emacs.d=, 2 in =shell-config=, 1 each in =.stumpwm.d=, =leetcode= and =personal-documents=.
 
-Pushing =brilliant-cv= to a new private repo (it was cloned from a template, and its origin was removed):
-#+begin_src sh
-cd ~/Downloads/brilliant-cv
-git add -A && git commit -m "my CV"
-gh repo create nbljaved/brilliant-cv --private --source=. --push   # or create it on github.com and: git remote add origin …; git push -u origin master
-#+end_src
+=brilliant-cv= needed this treatment and got a simpler one on 2026-10-04: its files moved into =~/Documents/personal/personal-documents/resume-papa= and were committed there (=e983dc0=), so it rides along with a repo that already has a remote. Only =~/Downloads/brilliant-cv/.git= is left, holding the old single =init= commit; delete it once =personal-documents= is pushed.
 
 ** TODO 1.2 Capture live state into guix-config
 =make sync= refreshes =current-profile-manifest=, =nix-config/manifest.nix= and =attribute-manifest.nix=. It also *overwrites =config-pc.scm= from =/etc/config.scm=*. Today the two are identical, including the TEMP lines, and 1.3 fixes them next.
@@ -199,74 +208,59 @@ git log origin/main -1 --oneline                             # must show this co
 #+end_src
 
 ** TODO 1.5 Re-run the at-risk survey
-Run the script from [[*C. At-risk survey script][Appendix C]]. Every line should say =ok=, or be something you have consciously left to the backup.
+Run the script from [[*C. At-risk survey script][Appendix C]]. Every line must say =ok=. There is nothing left to leave things to (D3), so an =uncommitted:=, =stashes:= or =unpushed-commits:= count here is a count of work you are about to delete.
 
-** TODO 1.6 Back up home (encrypted)
-Mount the drive. In StumpWM run =udisksctl mount -b /dev/sdX1=, which mounts it under =/run/media/nabeel/…=.
+** TODO 1.6 Carry the irreplaceable secrets off the pc
+No archive (D3). Four things cannot be re-downloaded or regenerated, and all four are tiny. The T460 is the destination: it is installed, it is staying, and it already holds a GitHub key.
+
+1. *=~/.age/key= — the one that actually matters.* It is the only thing that decrypts =Documents/personal/diary/diary.org.age=. Lose it and the diary is gone for good, GitHub copy or not. It is one line of text:
 #+begin_src sh
-BK=/run/media/nabeel/BACKUP/pc-2026-09      # <- adjust
-mkdir -p "$BK" && df -hT "$BK"               # >= 20 GB free; note the Type column
-
-cd /home
-tar -cpf - \
-  --exclude=nabeel/.cache \
-  --exclude=nabeel/.local/share/Trash \
-  --exclude=nabeel/.local/share/containers \
-  --exclude=nabeel/.npm \
-  --exclude=nabeel/.rustup \
-  --exclude=nabeel/.cargo/registry \
-  --exclude=nabeel/.cargo/git \
-  --exclude=nabeel/go/pkg \
-  --exclude=nabeel/.bun \
-  --exclude=nabeel/.local/share/uv \
-  --exclude=nabeel/.local/share/pnpm \
-  --exclude=nabeel/.emacs.d/elpaca \
-  --exclude=nabeel/Downloads/test/.venv \
-  --exclude=node_modules \
-  nabeel \
-| zstd -T0 -3 \
-| age -p > "$BK/home-nabeel.tar.zst.age"
+cat ~/.age/key                      # AGE-SECRET-KEY-1… : write it down, or photograph it
 #+end_src
-- For a FAT32 drive, replace the last line with: =| age -p | split -b 3900M - "$BK/home-nabeel.tar.zst.age.part-"=
-- Excluded items can all be re-downloaded: caches, toolchains, the 13 GB of podman storage (rebuilt with =make distrobox=), and elpaca's 206 package repos (re-cloned on first Emacs start).
-- Kept on purpose: =~/.config/google-chrome= (5.1 GB). Add =--exclude=nabeel/.config/google-chrome= if Chrome sync covers you.
-- =tar: … Permission denied= warnings mean root-owned leftovers in =~=. Read them, but they are usually caches.
-
-** TODO 1.7 Back up system-level state (sudo, encrypted)
-This covers SSH host keys (so other machines don't warn "host identification changed"), Tailscale identity, Wi-Fi profiles, and the live config. =/etc/guix= is deliberately left out: its ACL is regenerated from the config, and this machine's own archive key is not trusted anywhere.
+   The T460 has no SSH server (its D4), so *run the copy from the T460*, pulling from here:
 #+begin_src sh
-sudo -v
-sudo tar -cpf - /etc/ssh/ssh_host_* /var/lib/tailscale /etc/NetworkManager/system-connections \
-               /etc/config.scm /etc/signing-key.pub \
-| age -p > "$BK/system.tar.age"
-cp ~/guix-config/REINSTALL-pc.org "$BK/"
+# on the thinkpad:
+mkdir -p ~/.age && chmod 700 ~/.age
+scp 'nabeel@pc:~/.age/key*' ~/.age/ && chmod 600 ~/.age/key
+age -d ~/Documents/personal/diary/diary.org.age | head -1     # prove it before the pc is wiped
 #+end_src
-
-** TODO 1.8 Verify the backups
+   If you'd rather not have the key sitting on two disks: =age -p < ~/.age/key > key.age=, commit =key.age= to =personal-documents=, and keep *that* passphrase on paper. The ciphertext is useless without it, and =age= is one =apt install= away.
+2. *=~/.ssh/id_ed25519=.* Not strictly irreplaceable: you can delete the old =pc= key on github.com and add a fresh one from the new install (3.4). Copy it only if you want the same identity. What matters instead is the fallback in 1.8.
+3. *The Mullvad account number* (=~/.mullvad=). A 16-digit number /is/ the account; there is no email login behind it. Open the app, read it, write it on paper.
+4. *Wi-Fi passwords*, so you aren't guessing later:
 #+begin_src sh
-set -o pipefail
-age -d "$BK/home-nabeel.tar.zst.age" | zstd -dc | tar -tf - > /tmp/home-list.txt && echo ARCHIVE-OK
-wc -l < /tmp/home-list.txt
-for f in .ssh/id_ed25519 .age/key .emacs.d/Emacs.org Downloads/brilliant-cv/cv.typ qa-questions.org; do
-  grep -qx "nabeel/$f" /tmp/home-list.txt && echo "ok  $f" || echo "MISSING  $f"
-done
-grep -c '^nabeel/.emacs.d/.git/' /tmp/home-list.txt     # > 0: stashes and history are inside
-rm /tmp/home-list.txt
-age -d "$BK/system.tar.age" | tar -tvf -                 # lists ssh host keys, tailscale, NM profiles
+sudo grep -h -e '^ssid=' -e '^psk=' /etc/NetworkManager/system-connections/* 2>/dev/null
 #+end_src
-- [ ] =ARCHIVE-OK= printed, and no =MISSING= lines
-- [ ] system archive lists =etc/ssh=, =var/lib/tailscale=, =etc/NetworkManager/system-connections=
-- [ ] passphrase written on paper
+Anything else you think of goes to the T460 the same way — but keep the list short. Every copy of a secret is another place it can leak from, which is the reason this step is four items and not a disk image.
+
+** TODO 1.7 What you are letting go outside /home (for the record)
+Nothing here is saved (D3). This is what Phase 2 erases outside =/home=, and what replaces it:
+| What                                       | Replacement after the install                                                                     |
+|--------------------------------------------+---------------------------------------------------------------------------------------------------|
+| =/etc/ssh/ssh_host_*=                        | regenerated at first boot. Other machines refuse once with "host identification has changed"; clear it there with =ssh-keygen -R pc= |
+| =/var/lib/tailscale=                         | =sudo tailscale up= gives a new node; delete the stale =pc= in the admin console (3.11)               |
+| =/etc/NetworkManager/system-connections=     | retype the passwords you printed in 1.6                                                           |
+| =/etc/config.scm=                            | =config-pc.scm=, in git, fixed up by 1.3                                                            |
+| =/etc/guix/acl=                              | regenerated from the config; nonguix's key is =signing-key.pub= in git                              |
+
+** TODO 1.8 Verify you can get back in afterwards
+This replaces "verify the backups". With no archive, the failure that really hurts is being locked out of the place everything now lives.
+- [ ] *GitHub, without this machine's SSH key*: you know the password, and the 2FA device is in your hand. Check the password is not only inside the browser profile you are about to erase. Recovery codes on paper are better: https://github.com/settings/security
+- [ ] *Chrome sync is on* and the bookmarks/passwords really are in the account (=chrome://settings/syncSetup=). LibreWolf has no sync here: export what you need now.
+- [ ] *Tailscale*: the identity provider behind =tailscale up= is one you can still log in to.
+- [ ] The age key is on the T460 and decrypted the diary there (1.6).
+- [ ] The Mullvad account number is on paper (1.6).
+- [ ] =bash ~/repo-risk.sh= says =ok= on every line, and =git stash list= is empty in all ten repos (1.1, 1.5).
 
 ** TODO 1.9 Download the ISO and write the USB stick
 #+begin_src sh
 curl -L -o ~/guix-install.iso https://ci.guix.gnu.org/download/3964
 stat -c %s ~/guix-install.iso                 # 1308991488 for build 24925386
-sha256sum ~/guix-install.iso | tee -a "$BK/iso.sha256"
+sha256sum ~/guix-install.iso
 
 lsblk -o NAME,SIZE,MODEL,TRAN,MOUNTPOINTS      # find the USB stick: TRAN=usb, e.g. sdb
 #+end_src
-*DESTRUCTIVE*, and only for the stick. Never =nvme0n1=, never the backup drive:
+*DESTRUCTIVE*, and only for the stick. Never =nvme0n1=, and never another disk you care about:
 #+begin_src sh
 sudo umount /dev/sdX?* 2>/dev/null
 sudo dd if=~/guix-install.iso of=/dev/sdX bs=4M status=progress conv=fsync
@@ -275,11 +269,11 @@ sudo dd if=~/guix-install.iso of=/dev/sdX bs=4M status=progress conv=fsync
 ** TODO 1.10 Pre-flight checklist [0/8]
 - [ ] The survey (1.5) shows nothing you care about as unsaved
 - [ ] =guix-config= is pushed, with the 1.3 changes and this file (=git log origin/main -1=)
-- [ ] Both archives are verified (1.8), and the passphrase is on paper
-- [ ] This file is on the backup drive, and readable on GitHub from your phone
+- [ ] 1.8 passes: GitHub is reachable without this disk, and the age key is proven on the T460
+- [ ] This file is pushed and readable on GitHub from your phone
 - [ ] The USB stick is written
 - [ ] The Ethernet cable is plugged in (or the phone is ready for USB tethering)
-- [ ] *The backup drive is unplugged*, so it cannot be formatted by mistake
+- [ ] Nothing else is plugged in that you would mind erasing
 - [ ] You can log in to GitHub another way if the SSH key restore fails (password or PAT)
 
 * Phase 2 — Install from the live USB
@@ -424,14 +418,25 @@ grep -c 'define (rename-file\*' "$G/share/guile/site/3.0/guix/scripts/substitute
 ** TODO 3.3 Network
 Wi-Fi now works (nonguix kernel + =linux-firmware=). Either use =nmcli device wifi connect "<SSID>" --ask=, or restore your old profiles in 3.11.
 
-** TODO 3.4 Restore secrets first
+** TODO 3.4 Put the two keys back
+No archive (D3). =~/.gitconfig= and =~/.config/git/ignore= come from =shell-config= in 3.6, so only the keys need hands here.
+
+=~/.age/key=: this machine has no network secrets yet, and the T460 has no SSH server, so *push it from the T460* (or retype the one line from your paper):
 #+begin_src sh
-udisksctl mount -b /dev/sdX1                        # the backup drive
-BK=/run/media/nabeel/BACKUP/pc-2026-09
-guix shell age zstd -- sh -c 'age -d "$1" | zstd -dc | tar -xpf - -C /home \
-   nabeel/.ssh nabeel/.age nabeel/.gitconfig nabeel/.config/git' _ "$BK/home-nabeel.tar.zst.age"
-chmod 700 ~/.ssh && chmod 600 ~/.ssh/id_ed25519
-ssh -T git@github.com                               # "Hi nbljaved! …"
+# on the thinkpad:
+scp ~/.age/key ~/.age/key.pub nabeel@pc:.age/
+#+end_src
+#+begin_src sh
+chmod 700 ~/.age && chmod 600 ~/.age/key
+age -d ~/Documents/personal/diary/diary.org.age | head -1      # after 3.5
+#+end_src
+
+SSH: either copy the old key across the same way, or make a new one — which is what the T460 did (its D5), and it means a lost disk only costs you one revoked key:
+#+begin_src sh
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+ssh-keygen -t ed25519 -C "nabeel@pc"
+cat ~/.ssh/id_ed25519.pub        # add at https://github.com/settings/keys, then delete the old pc key
+ssh -T git@github.com            # "Hi nbljaved! …"
 #+end_src
 
 ** TODO 3.5 Clone your repos — where each one goes
@@ -447,8 +452,8 @@ ssh -T git@github.com                               # "Hi nbljaved! …"
 |  8 | =~/Documents/public=                                            | =git@github.com:nbljaved/public.git=                                   | public     | HF space =agent_couse_Final_Assignment_Template= (=git@hf.co=) |
 |  9 | =~/Documents/personal/diary=                                    | =git@github.com:nbljaved/diary.git=                                    | private    | —                                                          |
 | 10 | =~/Documents/personal/personal-documents=                       | =git@github.com:nbljaved/personal-documents.git=                       | private    | =jobs/natsoft/natsoft-activities= (=nbl-natsoft=, private)     |
-|  — | =~/Downloads/brilliant-cv=                                      | your new private repo if you made one in 1.1; else the backup (3.13) | —          | —                                                          |
-|  — | =~/Downloads/test=, =~/Downloads/nonguix=, =~/Downloads/smolagents= | restored with =Downloads/= in 3.13                                     | —          | —                                                          |
+|  — | =~/Downloads/brilliant-cv=                                      | now =personal-documents/resume-papa= (moved 2026-10-04)              | private    | —                                                          |
+|  — | =~/Downloads/test=, =~/Downloads/nonguix=, =~/Downloads/smolagents= | not coming back (D3); the two clones come from upstream                | —          | —                                                          |
 Visibility was checked on 2026-09-21 with anonymous HTTPS. Things that re-download by themselves: guix channel checkouts (=guix pull=), elpaca packages (first Emacs start), cargo checkouts.
 
 #+begin_src sh
@@ -514,7 +519,7 @@ emacs      # first start: elpaca clones and builds ~200 packages. Let it finish,
 #+end_src
 
 ** TODO 3.9 StumpWM and Common Lisp
-Either restore =~/quicklisp= from the backup (3.13), or rebuild it from upstream with =bash ~/.stumpwm.d/bootstrap-quicklisp.sh=, which checks the installer's signature and makes the =clx-truetype= link itself. =~/.sbclrc= is no longer backup material: it lives in =shell-config= and 3.6 symlinks it. Quicklisp exists here only for =clx-truetype=, which =load-fonts.lisp= needs for the StumpWM font on this screen, and for =alert-me=.
+There is no backup to restore from (D3), so rebuild =~/quicklisp= from upstream with =bash ~/.stumpwm.d/bootstrap-quicklisp.sh=, which checks the installer's signature and makes the =clx-truetype= link itself. =~/.sbclrc= is no longer backup material: it lives in =shell-config= and 3.6 symlinks it. Quicklisp exists here only for =clx-truetype=, which =load-fonts.lisp= needs for the StumpWM font on this screen, and for =alert-me=.
 
 ** TODO 3.10 Nix
 #+begin_src sh
@@ -523,18 +528,17 @@ nix-channel --update
 cd ~/guix-config && make apply-nix-profile
 #+end_src
 
-** TODO 3.11 Tailscale, SSH host keys, Wi-Fi profiles (sudo)
-Restoring Tailscale state keeps pc's identity and IP. The alternative is =sudo tailscale up=, then deleting the old "pc" node in the admin console.
+** TODO 3.11 Tailscale, SSH host keys, Wi-Fi (sudo)
+Nothing to restore (D3), so this machine comes back with a new host identity and a new tailnet node:
 #+begin_src sh
-sudo -v
-sudo herd stop tailscaled
-guix shell age -- age -d "$BK/system.tar.age" \
-  | sudo tar -xpf - -C / etc/ssh var/lib/tailscale etc/NetworkManager/system-connections
-sudo herd start tailscaled
-sudo herd restart ssh-daemon
-sudo herd restart network-manager
+sudo herd status ssh-daemon          # fresh host keys were generated at first boot
+sudo tailscale up                    # then delete the stale "pc" at https://login.tailscale.com/admin/machines
 tailscale status
+nmcli device wifi list
+sudo nmcli device wifi connect "<SSID>" --ask     # retype the password you printed in 1.6
 #+end_src
+- On your other machines the first SSH connection to =pc= will refuse with "host identification has changed". Clear the old entry there: =ssh-keygen -R pc= (and =ssh-keygen -R <ip>= if you connect by address).
+- The T460 reaches this machine by tailnet name, so its =scp= in 3.4 needs =tailscale up= to have run on both ends — or use the LAN address until then.
 
 ** TODO 3.12 Containers
 #+begin_src sh
@@ -542,32 +546,15 @@ cd ~/guix-config && make distrobox          # rebuilds the Arch image and recrea
 #+end_src
 The shot-scraper image: see =~/guix-config/.config/useful-docker-images/shot-scraper/=.
 
-** TODO 3.13 Restore the remaining data
-Extract the whole archive to a staging directory and copy back what you want:
-#+begin_src sh
-mkdir -p ~/restore && cd ~/restore
-guix shell age zstd -- sh -c 'age -d "$1" | zstd -dc | tar -xpf -' _ "$BK/home-nabeel.tar.zst.age"
-O=~/restore/nabeel
-rsync -a "$O/Downloads/"            ~/Downloads/           # incl. brilliant-cv, test, nonguix, smolagents (with .git)
-rsync -a "$O/Calibre Library"       ~/
-rsync -a "$O/.librewolf" "$O/.telega" "$O/.claude" "$O/.claude.json" "$O/.gemini" "$O/.zai" \
-         "$O/.mullvad" "$O/.pki" "$O/.android" "$O/quicklisp" "$O/.roswell" "$O/src" "$O/.fonts" "$O/Desktop" ~/
-rsync -a "$O/.sbclrc" "$O/.slynkrc" "$O/.Xresources" "$O/.Xdefaults" "$O/.fehbg" \
-         "$O/.bash_history" "$O/.org-timestamps" "$O/qa-questions.org" "$O/guix-home-config.scm" ~/
-mkdir -p ~/.config ~/.local/share
-rsync -a "$O/.config/google-chrome" "$O/.config/opencode" "$O/.config/rclone" "$O/.config/calibre" \
-         "$O/.config/libreoffice" "$O/.config/xfce4" ~/.config/
-rsync -a "$O/.local/share/TelegramDesktop" "$O/.local/share/opencode" "$O/.local/share/fonts" ~/.local/share/
-fc-cache -f
-# ignored-but-useful files inside repos:
-rsync -a "$O/guix-config/.claude" ~/guix-config/;  rsync -a "$O/guix-config/.config/.claude" ~/guix-config/.config/
-rsync -a "$O/.stumpwm.d/winner-layouts" "$O/.stumpwm.d/history" ~/.stumpwm.d/
-rsync -a "$O/Documents/public/.claude" ~/Documents/public/
-ls ~/stash-*.patch 2>/dev/null   # if you used option B in 1.1, copy these from $O
-#+end_src
-- Close browsers before restoring their profiles.
-- Compare anything else with =diff <(ls -A "$O") <(ls -A ~)=.
-- When you're satisfied: =rm -rf ~/restore= (it contains your keys). Keep the backup drive for a few weeks.
+** TODO 3.13 What isn't coming back
+There is no archive (D3). This is the re-login and re-create list, and it is the price of the choice:
+- *Chrome*: sign in, let sync restore bookmarks and passwords (you checked this in 1.8). *LibreWolf* starts empty.
+- *Telegram*: scan the QR from the phone — both the desktop app and =.telega=.
+- *Claude Code, gemini, zai, opencode, rclone, Mullvad*: log in again. The Mullvad account number is on your paper from 1.6. This project's Claude memory under =~/.claude/projects/= is gone; the runbooks in git are the record that matters.
+- *Lisp*: =bash ~/.stumpwm.d/bootstrap-quicklisp.sh= for =~/quicklisp= (3.9), and =ros setup= if you still use Roswell.
+- *Fonts*: re-download the ones you miss into =~/.local/share/fonts=, then =fc-cache -f=.
+- *Gone unless you committed them first*: =~/Calibre Library=, =~/Downloads= (incl. =test=), =~/.bash_history=, =~/.org-timestamps=, =~/.fehbg=, the loose =~/qa-questions.org=, =~/ai-questions.org= and =~/guix-home-config.scm=, and the gitignored =guix-config/.claude/=, =.stumpwm.d/winner-layouts=, =.stumpwm.d/history=, =Documents/public/.claude/=. The ignored ones rebuild themselves as you work.
+- There is nothing to diff the new =~= against any more. [[*C. At-risk survey script][Appendix C]] is the only check left, and it only sees repos.
 
 ** TODO 3.14 Commit the post-install changes
 #+begin_src sh
@@ -576,13 +563,14 @@ git diff                         # expect: resume_offset, channels-lock.scm, may
 git add -A config-pc.scm channels-lock.scm && git commit -m "pc: post-reinstall resume offset + fresh channel lock" && git push
 #+end_src
 
-** TODO 3.15 Done checklist [0/10]
+** TODO 3.15 Done checklist [0/11]
 - [ ] =guix describe= shows recent commits, and 3.2 prints =1=
 - [ ] Substitutes work: =guix build hello= downloads rather than builds
 - [ ] Wi-Fi, Bluetooth, sound, printing
 - [ ] Hibernation: =loginctl hibernate=, then resume
 - [ ] =tailscale status=
-- [ ] SSH into pc from another machine with no host-key warning
+- [ ] SSH into pc from another machine, after clearing its old host key (1.7)
+- [ ] The age key is back and the diary decrypts: =age -d ~/Documents/personal/diary/diary.org.age | head -1= (3.4)
 - [ ] =distrobox enter arch=, podman
 - [ ] Nix packages on =PATH=
 - [ ] Emacs starts cleanly; the StumpWM session works
@@ -594,30 +582,33 @@ git add -A config-pc.scm channels-lock.scm && git commit -m "pc: post-reinstall 
 - 206 elpaca package repos under =~/.emacs.d/elpaca/repos=. Only 3 have changes, and those are regenerated =*-autoloads.el= files, so all are disposable.
 - =~/.cargo/git/checkouts/*= is cargo's cache and disposable.
 
-** B. Non-git data inventory (2026-09-21)
-| What                                                   | Size   | Why it matters                        | In backup |
-|--------------------------------------------------------+--------+---------------------------------------+-----------|
-| =~/.ssh= (=id_ed25519=)                                | 24K    | GitHub access to your private repos   | yes       |
-| =~/.age= (=key=)                                       | 12K    | decrypts your age-encrypted files     | yes       |
-| =~/.claude=, =~/.claude.json=                          | 235M   | Claude Code settings, memory, history | yes       |
-| =~/.gemini=, =~/.zai=, =~/.config/opencode=, =~/.local/share/opencode= | ~15M | AI tool configs and credentials | yes |
-| =~/.mullvad=, =~/.config/rclone=, =~/.pki=             | ~40M   | VPN, rclone remotes, NSS certificates | yes       |
-| =~/.librewolf=                                         | 834M   | bookmarks, passwords, sessions        | yes       |
-| =~/.config/google-chrome=                              | 5.1G   | profile (unless Chrome sync)          | yes       |
-| =~/.telega=, =~/.local/share/TelegramDesktop=          | 433M   | Telegram sessions and files           | yes       |
-| =~/Downloads= (loose files)                            | 151M   | personal documents, tickets, resumes  | yes       |
-| =~/Calibre Library=, =~/.config/calibre=               | 2.5M   | e-book library                        | yes       |
-| =~/.local/share/fonts=, =~/.fonts=                     | 104M   | user fonts                            | yes       |
-| =~/qa-questions.org=, =~/guix-home-config.scm=         | small  | loose files in =~=                    | yes       |
-| =~/.bash_history=, =~/.org-timestamps=                  | small  | history                               | yes       |
-| =~/.Xresources=, =~/.Xdefaults=, =~/.sbclrc=, =~/.gitconfig= | small  | in =shell-config= since 2026-10-04; 3.6 symlinks them | n/a |
-| =~/.slynkrc=                                           | small  | tangled from =Emacs.org= (3.8)          | n/a       |
-| =~/quicklisp=                                          | 13M    | rebuildable: =~/.stumpwm.d/bootstrap-quicklisp.sh= | optional |
-| =~/.roswell=                                             | 165M   | Lisp setup (saves reinstalling)       | yes       |
-| SSH host keys, =/var/lib/tailscale=, NM profiles       | small  | host identity, tailnet node, Wi-Fi    | system.tar.age |
-| =~/.local/share/containers=                            | 13G    | rebuilt with =make distrobox=         | no        |
-| =/nix=                                                 | 21G    | rebuilt with =make apply-nix-profile= | no        |
-| =~/.cache=, Trash, =.npm=, =.rustup=, =go/pkg=, =.bun=, uv, pnpm | ~16G | caches and toolchains      | no        |
+** B. Non-git data inventory (2026-09-21, outcomes revised 2026-10-04)
+Since D3 there is no archive, so the last column says what actually happens to each item. Sizes are from 2026-09-21 unless re-measured.
+| What                                                   | Size   | Why it matters                        | Under D3                           |
+|--------------------------------------------------------+--------+---------------------------------------+------------------------------------|
+| =~/.age= (=key=)                                           | 12K    | decrypts your age-encrypted files     | *carry it out* (1.6); irreplaceable  |
+| =~/.ssh= (=id_ed25519=)                                    | 24K    | GitHub access to your private repos   | carry it out, or make a new key (3.4) |
+| =~/.mullvad=                                             | ~40M   | VPN account                           | write the account number down (1.6) |
+| =~/.config/google-chrome=                                | 1.6G   | profile                               | Chrome sync only; verify in 1.8    |
+| =~/.librewolf=                                           | 1.1G   | bookmarks, passwords, sessions        | lost — export first if you care    |
+| =~/.claude=, =~/.claude.json=                              | 258M   | Claude Code settings, memory, history | lost; the runbooks in git are the record |
+| =~/.gemini=, =~/.zai=, =~/.config/opencode=, =~/.local/share/opencode= | ~15M | AI tool configs and credentials | lost; log in again (3.13)   |
+| =~/.telega=, =~/.local/share/TelegramDesktop=              | 369M   | Telegram sessions and files           | lost; re-scan the QR               |
+| =~/Downloads= (loose files, =test=)                        | ~200M  | personal documents, tickets, resumes  | lost unless committed. =brilliant-cv= was moved into =personal-documents= on 2026-10-04 |
+| =~/Calibre Library=, =~/.config/calibre=                   | 2.5M   | e-book library                        | lost unless committed (it fits)    |
+| =~/.local/share/fonts=, =~/.fonts=                         | 104M   | user fonts                            | lost; re-download, =fc-cache -f=     |
+| =~/qa-questions.org=, =~/ai-questions.org=, =~/guix-home-config.scm= | small | loose files in =~=            | lost unless committed — do it now  |
+| =~/.bash_history=, =~/.org-timestamps=, =~/.fehbg=           | small  | history, publish timestamps           | lost; harmless                     |
+| =~/.pki=, =~/.android=, =~/.ipython=, =~/.config/{hypr,mpv,xfce4,Thunar,htop}= | ~5M | tool state and small configs | lost; put the ones you care about in =shell-config= |
+| =~/.config/rclone=                                       | small  | rclone remotes                        | had no remotes configured on 2026-10-04 |
+| =~/.Xresources=, =~/.Xdefaults=, =~/.sbclrc=, =~/.gitconfig=   | small  | small configs                         | in =shell-config= since 2026-10-04; 3.6 symlinks them |
+| =~/.slynkrc=                                             | small  | slynk settings                        | tangled from =Emacs.org= (3.8)       |
+| =~/quicklisp=                                            | 13M    | Lisp setup                            | rebuilt by =~/.stumpwm.d/bootstrap-quicklisp.sh= (3.9) |
+| =~/.roswell=                                             | 165M   | Lisp setup                            | lost; =ros setup= if still used      |
+| SSH host keys, =/var/lib/tailscale=, NM profiles         | small  | host identity, tailnet node, Wi-Fi    | regenerated (1.7, 3.11)            |
+| =~/.local/share/containers=                              | 13G    | rebuilt with =make distrobox=           | no                                 |
+| =/nix=                                                   | 21G    | rebuilt with =make apply-nix-profile=   | no                                 |
+| =~/.cache=, Trash, =.npm=, =.rustup=, =go/pkg=, =.bun=, uv, pnpm | ~16G | caches and toolchains         | no                                 |
 
 ** C. At-risk survey script
 Save it as =~/repo-risk.sh= and run it with =bash ~/repo-risk.sh=. It's read-only.

@@ -98,7 +98,7 @@ You can't have both. Debian's kernel enters "lockdown" when Secure Boot is on, a
 - *No backup drive (chosen 2026-10-04).* The bet is that everything you need is in a GitHub repo. [[*F. What lives only outside git (surveyed 2026-10-04)][Appendix F]] is the survey that says how good a bet it is. So 1.3 and 1.4 were not run, and the restore steps are replaced: see [[*6.1 SSH key and secrets][6.1]], [[*6.7 Emacs, StumpWM and Quicklisp][6.7]] and [[*6.8 What you don't have, and where to get it][6.8]].
 - What makes it cheap *here*: the pc still has its home directory. Anything the T460 had that isn't on GitHub — =~/.age/key=, =~/.Xresources=, =~/.sbclrc= — exists on the pc too, so the copy of record moved from a drive to a machine rather than disappearing.
 - What it costs: the T460's Wi-Fi passwords, its =~/.bash_history=, its browser profile and anything you kept only there. Phase 3 already took those.
-- *It does not transfer to =REINSTALL-pc.org=.* The pc is the second copy for both machines, and nothing is the second copy for the pc. Its D3 wants a real drive.
+- *The pc took the same decision on 2026-10-04* (its D3). The roles have swapped: the pc was the T460's second copy, and the T460 — installed and staying — is now where the pc parks the few secrets it cannot regenerate, starting with =~/.age/key=. Neither machine has a drive behind it any more, so a repo with no remote, an uncommitted file and a stash are all the same thing: deleted.
 - Standing consequence: =git push= is now the backup. Nothing uncommitted survives a reinstall, on either machine.
 
 * Phase 0 — Prerequisites
@@ -997,7 +997,7 @@ sudo rm -rf /srv/tftp
 - On the T460, you can switch /UEFI IPv4 Network Stack/ back off. Nothing needs it after the install.
 
 ** F. What lives only outside git (surveyed 2026-10-04)
-The survey behind [[*D8 — Backups][D8]]. It was run *on the pc*, which still holds both machines' habits, so it doubles as the list =REINSTALL-pc.org= must not lose. Re-run [[*C. At-risk survey script][Appendix C]] to refresh the first part.
+The survey behind [[*D8 — Backups][D8]]. It was run *on the pc*, which still holds both machines' habits, so it is also the input to =REINSTALL-pc.org='s own no-backup decision (its D3): what that runbook cannot save, it now lists as an accepted loss. Re-run [[*C. At-risk survey script][Appendix C]] to refresh the first part.
 
 *The repos are fine.* All ten personal repos have a GitHub remote and nothing unpushed. But seven had uncommitted work that day, and with no drive that is exactly what a wipe takes:
 | Repo                                    | Uncommitted that day                                                       |
