@@ -639,13 +639,11 @@ ln -sf  ~/shell-config/starship/starship.toml ~/.config/starship.toml
 ln -sf  ~/guix-config/channels.scm            ~/.config/guix/channels.scm
 # used to come off the backup; they are in shell-config now (D8):
 ln -sf  ~/shell-config/.sbclrc                ~/.sbclrc
-ln -sf  ~/shell-config/.Xresources.thinkpad   ~/.Xresources
-ln -sf  ~/shell-config/.Xdefaults             ~/.Xdefaults
 ln -sf  ~/shell-config/.gitconfig             ~/.gitconfig
 mkdir -p ~/.config/git
 ln -sf  ~/shell-config/git/ignore             ~/.config/git/ignore
 #+end_src
-- =.Xresources.thinkpad= is the laptop's copy, because the pc's sets =Xft.dpi: 192= for its 4K panel. Check what this one wants: =xdpyinfo | grep -B1 dimensions= prints the resolution and the physical size; 96 suits a 1366x768 T460 panel, 144 a 1920x1080 one. =~/.xinitrc= (6.6) merges it with =xrdb=.
+- *No =~/.Xresources= symlink.* The X resources live in =~/.stumpwm.d= (=Xresources= plus =Xresources.thinkpad=) and =xinitrc= merges them from there, so there is nothing to link: [[*6.6 StumpWM session][6.6]]. Check the DPI that file guesses once X is up — =xdpyinfo | grep -B1 dimensions= prints the resolution and the physical size; 96 suits a 1366x768 T460 panel, 144 a 1920x1080 one.
 - =~/.slynkrc= is *not* symlinked: =Emacs.org= tangles it ([[*6.7 Emacs, StumpWM and Quicklisp][6.7]]).
 Your =.bashrc= already has a branch for distros other than Guix System. It sets =GUIX_LOCPATH=, =SSL_CERT_*= and sources the profile. Log out and back in afterwards.
 
@@ -662,21 +660,12 @@ make apply-guix-profile              # = guix package -m current-profile-manifes
 - Then open a new login shell and run =fc-cache -f= (Guix's fontconfig, from =thinkpad-manifest.scm=).
 
 ** TODO 6.6 StumpWM session
-Create =~/.xinitrc=:
+This step used to write =~/.xinitrc= by hand. It now lives in the =stumpwm-config= repo, hostname-guarded so the pc is unaffected, and documented in its =Readme.org= under "Starting the session":
 #+begin_src sh
-cat > ~/.xinitrc <<'EOF'
-#!/bin/sh
-# thinkpad (Debian): X server from Debian, StumpWM from Guix.
-# Let systemd user services (PipeWire, portals) see this display.
-dbus-update-activation-environment --systemd DISPLAY XAUTHORITY
-[ -f ~/.Xresources ] && xrdb -merge ~/.Xresources
-setxkbmap us -variant altgr-intl
-# Lock on suspend and on `loginctl lock-session`.  Debian's i3lock on
-# purpose: it authenticates through Debian's PAM.
-xss-lock --transfer-sleep-lock -- /usr/bin/i3lock --nofork &
-exec stumpwm
-EOF
+ln -sf ~/.stumpwm.d/xinitrc ~/.xinitrc
 #+end_src
+- What it does: exports =DISPLAY= and =XAUTHORITY= into the systemd user session so PipeWire and the portals see them; merges =~/.stumpwm.d/Xresources= and =Xresources.$(hostname)= with =xrdb=; sets the keyboard layout; starts =xss-lock= with =/usr/bin/i3lock=, Debian's own copy, because the locker authenticates through *Debian's* PAM; then =exec stumpwm=.
+- =Xresources.thinkpad= currently guesses =Xft.dpi: 96=. Fix it there, in the repo, if 4.7's panel turns out to be 1920x1080.
 Append this to =~/shell-config/.bash_profile=, then commit and push it in =shell-config=. The =hostname= check keeps it inert on the pc:
 #+begin_src sh
 # thinkpad (Debian): start X after logging in on tty1.  `exec` means
@@ -687,13 +676,9 @@ fi
 #+end_src
 Log out and log in on tty1: StumpWM should start. Test the locker with =loginctl lock-session= and by closing the lid.
 
-*One edit in =~/.stumpwm.d=, for the PATH shadowing in 4.5.* =bluetooth-start= in =defcommands.lisp= runs =blueman-applet= by bare name, so it would start the Guix copy, which can't reach =blueman-mechanism=. =init.lisp= already defines =pc?= from the hostname, so pick the binary from that:
-#+begin_src lisp
-(defparameter *blueman-applet* (if pc? "blueman-applet" "/usr/bin/blueman-applet"))
-#+end_src
-Use it in both places =bluetooth-start= names the program: the =executable?= test and the =run-shell-command=. Then commit and push it in =stumpwm-config=; the pc keeps running its Guix copy, so nothing changes there.
-- =udiskie-start= can stay as it is. The Guix =udiskie= only drives =udisks2=, which came from apt in 4.5.
+*The PATH shadowing from 4.5 is handled in the repo too* (committed 2026-10-04, so a fresh clone has it). =bluetooth-start= goes through =*blueman-applet*= in =defcommands.lisp=, which is =/usr/bin/blueman-applet= whenever =pc?= is false — the Guix copy can't reach =blueman-mechanism=.
 - Check what the session actually started: =pgrep -a blueman-applet= should show =/usr/bin/blueman-applet=, and pairing a device from the applet should work rather than failing silently.
+- =udiskie-start= can stay as it is. The Guix =udiskie= only drives =udisks2=, which came from apt in 4.5.
 
 ** TODO 6.7 Emacs, StumpWM and Quicklisp
 Emacs is the pc's step 3.8. =Emacs.org= is the source of truth: it tangles =init.el=, =early-init.el= and =~/.slynkrc=.
@@ -718,7 +703,8 @@ ls -l ~/quicklisp/local-projects/    # clx-truetype -> /home/nabeel/.stumpwm.d/c
 There is no archive (D8). This is what the old T460 home had that GitHub doesn't:
 | What                                                               | What to do about it                                                           |
 |--------------------------------------------------------------------+-------------------------------------------------------------------------------|
-| =.sbclrc=, =.Xresources=, =.Xdefaults=, =.gitconfig=, =.config/git/ignore= | symlinked from =shell-config= in 6.4                                            |
+| =.sbclrc=, =.gitconfig=, =.config/git/ignore=                          | symlinked from =shell-config= in 6.4                                            |
+| =.Xresources=, =.Xdefaults=                                          | now =Xresources= / =Xresources.thinkpad= in =stumpwm-config=, merged by its =xinitrc= (6.6) |
 | =~/.slynkrc=                                                         | tangled from =Emacs.org= in 6.7                                                 |
 | =~/quicklisp=                                                        | rebuilt from upstream in 6.7                                                  |
 | =~/.age/key=                                                         | only if you want the diary here: 6.1                                          |
@@ -1022,7 +1008,7 @@ The survey behind [[*D8 — Backups][D8]]. It was run *on the pc*, which still h
 | =~/qa-questions.org=, =~/ai-questions.org=, =~/guix-home-config.scm=          | small | loose files in =~= with no repo                                                                |
 | =~/.claude= 258M, =~/.librewolf= 1.1G, =~/.telega= 369M, =~/.config/google-chrome= 1.6G, =~/.mullvad=, =~/.roswell=, =~/.gemini=, =~/.zai=, =~/.config/opencode= | GB | sessions, histories, credentials. Not git material. Without a drive, a reinstall means signing in to all of them again |
 
-*Already handled, for the record:* =~/.sbclrc=, =~/.Xresources=, =~/.Xdefaults=, =~/.gitconfig= and =~/.config/git/ignore= went into =shell-config= on 2026-10-04; =~/.slynkrc= is tangled from =Emacs.org=; =~/quicklisp= is rebuilt by =~/.stumpwm.d/bootstrap-quicklisp.sh=.
+*Already handled, for the record (2026-10-04):* =~/.sbclrc=, =~/.gitconfig= and =~/.config/git/ignore= went into =shell-config=; =~/.Xresources= and =~/.Xdefaults= went into =stumpwm-config= as =Xresources=, =Xresources.pc= and =Xresources.thinkpad=, because only the X session reads them and =xinitrc= is what merges them; =~/.slynkrc= is tangled from =Emacs.org=; =~/quicklisp= is rebuilt by =~/.stumpwm.d/bootstrap-quicklisp.sh=. =~/.stumpwm.d/Readme.org= documents all of it, including the =config/= directory that had no instructions anywhere.
 
 *Regenerable, ignore:* =~/.local= (15G), =~/.npm= (3.6G), =~/.rustup=, =~/.bun=, =~/.cargo=, =~/go=, =~/node_modules=, =~/.emacs.d/elpaca=, =~/.fonts/font-cache.sexp=, =~/.config/guix= (symlinks), =~/.guile= (Guix's sample snippet), and =~/.profile= / =~/.zprofile= (Guix System artifacts; 6.4 renames Debian's own =.profile=).
 

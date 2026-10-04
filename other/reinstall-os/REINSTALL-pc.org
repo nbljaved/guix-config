@@ -486,8 +486,6 @@ mkdir -p ~/.config/guix
 ln -sf  ~/guix-config/channels.scm            ~/.config/guix/channels.scm
 ln -sf  ~/guix-config/nix-config/nix-channels ~/.nix-channels
 ln -sf  ~/shell-config/.sbclrc                ~/.sbclrc
-ln -sf  ~/shell-config/.Xresources            ~/.Xresources     # Xft.dpi 192, this machine's 4K panel
-ln -sf  ~/shell-config/.Xdefaults             ~/.Xdefaults
 ln -sf  ~/shell-config/.gitconfig             ~/.gitconfig
 mkdir -p ~/.config/git
 ln -sf  ~/shell-config/git/ignore             ~/.config/git/ignore
@@ -519,6 +517,7 @@ emacs      # first start: elpaca clones and builds ~200 packages. Let it finish,
 #+end_src
 
 ** TODO 3.9 StumpWM and Common Lisp
+=~/.stumpwm.d/Readme.org= documents the rest: the =config/= directory (picom, udiskie, xsettingsd, rofi get their paths passed explicitly, nothing is symlinked into =~/.config=), the X resources, and why this machine needs no =~/.xinitrc= — GDM builds the session.
 There is no backup to restore from (D3), so rebuild =~/quicklisp= from upstream with =bash ~/.stumpwm.d/bootstrap-quicklisp.sh=, which checks the installer's signature and makes the =clx-truetype= link itself. =~/.sbclrc= is no longer backup material: it lives in =shell-config= and 3.6 symlinks it. Quicklisp exists here only for =clx-truetype=, which =load-fonts.lisp= needs for the StumpWM font on this screen, and for =alert-me=.
 
 ** TODO 3.10 Nix
@@ -601,7 +600,8 @@ Since D3 there is no archive, so the last column says what actually happens to e
 | =~/.bash_history=, =~/.org-timestamps=, =~/.fehbg=           | small  | history, publish timestamps           | lost; harmless                     |
 | =~/.pki=, =~/.android=, =~/.ipython=, =~/.config/{hypr,mpv,xfce4,Thunar,htop}= | ~5M | tool state and small configs | lost; put the ones you care about in =shell-config= |
 | =~/.config/rclone=                                       | small  | rclone remotes                        | had no remotes configured on 2026-10-04 |
-| =~/.Xresources=, =~/.Xdefaults=, =~/.sbclrc=, =~/.gitconfig=   | small  | small configs                         | in =shell-config= since 2026-10-04; 3.6 symlinks them |
+| =~/.sbclrc=, =~/.gitconfig=                                | small  | small configs                         | in =shell-config= since 2026-10-04; 3.6 symlinks them |
+| =~/.Xresources=, =~/.Xdefaults=                            | small  | DPI, cursor size, font rendering      | moved into =stumpwm-config= 2026-10-04. Nothing on this machine reads them: GDM never runs =xrdb=, and =xsettingsd= (=.stumpwm.d/config/xsettingsd/.xsettingsd=) applies 144 dpi instead |
 | =~/.slynkrc=                                             | small  | slynk settings                        | tangled from =Emacs.org= (3.8)       |
 | =~/quicklisp=                                            | 13M    | Lisp setup                            | rebuilt by =~/.stumpwm.d/bootstrap-quicklisp.sh= (3.9) |
 | =~/.roswell=                                             | 165M   | Lisp setup                            | lost; =ros setup= if still used      |
