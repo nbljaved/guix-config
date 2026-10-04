@@ -21,8 +21,16 @@ GUIX_SYSTEM := $(shell grep '^ID=guix' /etc/os-release)
 NIX := $(shell command -v nix >/dev/null 2>&1 && echo nix)
 
 # Host config file for the current machine (empty on unknown hosts).
+#
+# The thinkpad is moving from Guix System to Debian + Guix (see
+# REINSTALL-thinkpad.org). On Debian it has no system config, and its
+# profile is the shared manifest plus thinkpad-manifest.scm.
 ifeq ($(HOSTNAME), thinkpad)
+ifeq ($(GUIX_SYSTEM),)
+EXTRA_MANIFESTS := -m thinkpad-manifest.scm
+else
 HOST_CONFIG := config-thinkpad.scm
+endif
 endif
 ifeq ($(HOSTNAME), pc)
 HOST_CONFIG := config-pc.scm
@@ -44,7 +52,7 @@ all: sync ## Alias for `sync` (the default target)
 sync: sync-guix sync-nix ## Capture live system state into the repo (guix + nix)
 
 sync-guix: ## Capture /etc/config.scm, channels symlink, and current Guix profile manifest
-ifeq ($(HOSTNAME), thinkpad)
+ifeq ($(HOST_CONFIG), config-thinkpad.scm)
 	cat /etc/config.scm > config-thinkpad.scm
 else
 	# not thinkpad
@@ -68,7 +76,14 @@ endif
 	# from the pipe before opening the output file for writing
 	#
 	# guile ./scripts/sort-manifest.scm  current-profile-manifest | sponge current-profile-manifest
+ifdef EXTRA_MANIFESTS
+	# This profile is the shared manifest plus $(EXTRA_MANIFESTS), so
+	# capturing it would leak host-only packages into the shared file.
+	# Show the difference instead; copy what you want by hand.
+	guile ./scripts/sort-manifest.scm | diff current-profile-manifest - || true
+else
 	guile ./scripts/sort-manifest.scm > current-profile-manifest
+endif
 	@echo ""
 
 sync-nix: ## Capture Nix channels symlink and current Nix profile manifest (if nix is installed)
@@ -84,7 +99,7 @@ endif
 	@echo ""
 
 apply-guix-system: ## Copy this host's config to /etc/config.scm and (prompt to) reconfigure
-ifeq ($(HOSTNAME), thinkpad)
+ifeq ($(HOST_CONFIG), config-thinkpad.scm)
 	sudo cp config-thinkpad.scm /etc/config.scm
 	@printf "Reconfigure system? [y/N] " && read ans; \
 	if [ "$$ans" = "y" ] || [ "$$ans" = "Y" ]; then \
@@ -109,8 +124,8 @@ else
 	guix system build $(HOST_CONFIG) -L modules
 endif
 
-apply-guix-profile: ## Install the captured Guix profile from current-profile-manifest
-	guix package -m current-profile-manifest -L modules
+apply-guix-profile: ## Install the captured Guix profile from current-profile-manifest (+ host extras)
+	guix package -m current-profile-manifest $(EXTRA_MANIFESTS) -L modules
 
 apply-nix-profile: ## Install the captured Nix profile from nix-config/attribute-manifest.nix
 	nix-env --install --remove-all --file ./nix-config/attribute-manifest.nix
