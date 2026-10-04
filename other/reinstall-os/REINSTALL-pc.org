@@ -63,6 +63,7 @@ The reinstall trades those unattended hours, and the fiddly step 4, for about 1�
 ** D2 — disk layout
 - *A (recommended):* keep the partition table. Reformat only =nvme0n1p3= with the label =guix-root=.
 - *B (optional):* split =nvme0n1p3= into root (~350 GiB) and a separate =/home= (the rest), so the next reinstall can leave =/home= untouched. It adds steps in [[*2.5 Partition and format — DESTRUCTIVE][2.5]] and one =file-system= entry.
+- *Either way, read [[*D5 — Disk encryption][D5]] first.* With encryption, B is no longer one extra =mkfs=: a second partition outside the container would leave your home directory in the clear, so it needs its own LUKS container — which means a second passphrase at boot, or a key file inside the encrypted root (=#:key-file=, see the manual's Mapped Devices). A is the simple path: one container, =/home= inside it.
 
 ** D3 — Backups: none (chosen 2026-10-04)
 - *No backup drive, the same bet the T460 made (its D8): only what is in a git repo survives.* So the old 1.6/1.7/1.8 are gone — 1.6 now carries four secrets off the machine, 1.7 lists what is being let go, and 1.8 checks you can still get back in.
@@ -85,6 +86,17 @@ The reinstall trades those unattended hours, and the fiddly step 4, for about 1�
 ** D4 — network during the install
 - Plug an *Ethernet cable* into the onboard port. The installer can't use your Wi-Fi.
 - Fallback: *USB tethering* from your phone shows up as =usb0= or =enp…u…=.
+
+** D5 — Disk encryption
+The T460 got LUKS from Debian's installer. This machine gets it by hand, and Guix supports it properly. *Chosen 2026-10-04: LUKS2 on =nvme0n1p3=, with =/=, =/boot=, =/gnu= and the swap file all inside the container.* Only the EFI partition stays in the clear, which is unavoidable without coreboot.
+- *One passphrase, not two.* GRUB must unlock the container to read =/boot=, and the initrd must unlock it to mount =/=. Guix closes that gap by itself: =cryptomount= keeps the volume's master key, GRUB's =procfs= exposes it as =(proc)/luks_script=, and the generated =grub.cfg= injects that file into the initrd (=initrd newc:etc/luks_script:(proc)/luks_script … /boot/initrd=). The initrd matches the UUID and runs =cryptsetup open --volume-key-file=, so nothing is asked a second time; if the key is missing or doesn't match it just prompts, so the fallback is safe. *No configuration is required.* See the manual node "Automatic LUKS Master Key Passing"; in the guix you pull in 2.9 the code is =gnu/bootloader/grub.scm= (=newc:etc/luks_script=, =insmod procfs/luks/luks2=, =GRUB_ENABLE_CRYPTODISK=y=) and =gnu/system/mapped-devices.scm= (=luks-script-lookup-key=).
+- *LUKS2 with argon2id, but memory cost lowered to 256 MiB.* cryptsetup's argon2id default costs up to 1 GiB of RAM, and GRUB has to redo that KDF in the pre-boot environment, where allocations are capped below 4 GiB. On firmware that leaves little contiguous low memory, that combination makes a machine *unbootable*: correct passphrases get rejected, or GRUB runs out of memory loading the kernel. So 2.5 passes =--pbkdf-memory 262144 --pbkdf-force-iterations 4=. GRUB *2.14*, which is what Guix ships (=guix show grub-efi= → 2.14), is the first release that can do argon2 at all — that is why older Guix write-ups tell you to use =--type luks1= or =--pbkdf pbkdf2=.
+- *Expect a slow prompt.* GRUB does the KDF and AES without the CPU's crypto instructions; several seconds to half a minute is normal. The kernel's own unlock afterwards is instant.
+- *=nvme0n1p2=, the old plain swap partition, is abandoned.* Swap outside the container would hold pages of whatever you ran, and a hibernation image is a verbatim copy of your RAM — writing that in the clear would undo the whole exercise. Hibernation uses the 16 GiB =/swapfile= inside the encrypted root instead (2.7). This machine has 30 GiB of RAM and the manual says hibernation uses at most half of it, so 16 GiB is enough. Leave =p2= untouched; wipe it or add it as a second LUKS device later if you want the space.
+- *What this does not protect*, the same honest list as the T460's D7: the ESP is unencrypted and nothing verifies GRUB, so someone with physical access can still tamper with the boot path. LUKS protects data at rest, which is what you are asking of it. Closing the boot path needs Secure Boot plus TPM measurement, which this plan does not set up.
+- *You type it at GRUB*, so the layout that matters is the one in =bootloader-configuration=; the kernel's own layout (from =operating-system=) only comes into play if the fallback prompt appears. =config-pc.scm= sets both to =us/altgr-intl=, but a plain-ASCII passphrase sidesteps the question entirely. Keep it on paper until the machine has booted successfully.
+- *If GRUB can't unlock it*: boot the installer again, =cryptsetup open /dev/nvme0n1p3 cryptroot=, then =cryptsetup luksConvertKey --pbkdf pbkdf2 /dev/nvme0n1p3=. That rewrites the keyslot's KDF in place — no reinstall — and every GRUB since 2.06 can do pbkdf2. Then re-run 2.10 (or =guix system reconfigure= later) so =grub.cfg= is regenerated.
+- Known cosmetic bug: once the root file system is mounted, =/etc/luks_script= no longer exists, so unlocking any *other* LUKS device later logs "…not found, skipping" (Guix bug #81173). The system boots fine.
 
 * Phase 1 — Save everything (current system)
 ** TODO 1.0 Reboot once
@@ -311,29 +323,39 @@ lsblk -f
 #+end_src
 *Point of no return.* After the next command, your old =/=, =/home=, =/gnu= and =/nix= are gone.
 
-D2-A (recommended):
+D2-A (recommended), now with LUKS2 (D5). The =luksFormat= asks for the passphrase twice; =open= asks once:
 #+begin_src sh
-mkfs.ext4 -L guix-root /dev/nvme0n1p3
+cryptsetup luksFormat --type luks2 \
+  --pbkdf argon2id --pbkdf-memory 262144 --pbkdf-force-iterations 4 \
+  --verify-passphrase /dev/nvme0n1p3
+cryptsetup luksUUID /dev/nvme0n1p3     # WRITE THIS DOWN: 2.8 puts it in config-pc.scm
+cryptsetup open /dev/nvme0n1p3 cryptroot
+mkfs.ext4 -L guix-root /dev/mapper/cryptroot
+cryptsetup luksDump /dev/nvme0n1p3 | grep -A6 'Keyslots:'   # expect argon2id, Memory: 262144
 #+end_src
-Do *not* touch =p1= or =p2=: no =mkfs.fat=, no =mkswap=. That keeps the UUIDs =config-pc.scm= refers to.
+Do *not* touch =p1=: no =mkfs.fat=. =p2= is left alone too, but is no longer used as swap (D5), so =config-pc.scm= drops it in 2.8.
 
-D2-B (separate =/home=): run =cfdisk /dev/nvme0n1=, delete =nvme0n1p3=, create a new =p3= (~350G, type "Linux filesystem"), create =p4= from the remaining space, then Write and Quit. Then:
+D2-B (separate =/home=): run =cfdisk /dev/nvme0n1=, delete =nvme0n1p3=, create a new =p3= (~350G, type "Linux filesystem"), create =p4= from the remaining space, then Write and Quit. *Under D5 this needs two containers* — a plain =mkfs.ext4= on =p4= would leave your home directory unencrypted:
 #+begin_src sh
-mkfs.ext4 -L guix-root /dev/nvme0n1p3
-mkfs.ext4 -L guix-home /dev/nvme0n1p4
+# p3: as in D2-A above, then:
+cryptsetup luksFormat --type luks2 --pbkdf argon2id --pbkdf-memory 262144 \
+  --pbkdf-force-iterations 4 --verify-passphrase /dev/nvme0n1p4
+cryptsetup open /dev/nvme0n1p4 crypthome
+mkfs.ext4 -L guix-home /dev/mapper/crypthome
 #+end_src
+That is a second passphrase at every boot unless you add a key file that lives inside the encrypted root and reference it with =#:key-file= in the second =mapped-device= (manual: Mapped Devices). If that sounds like more than you want, take D2-A.
 
 ** 2.6 Mount and start cow-store
 #+begin_src sh
-mount LABEL=guix-root /mnt
+mount LABEL=guix-root /mnt         # the label is on /dev/mapper/cryptroot
 mkdir -p /mnt/boot/efi && mount /dev/nvme0n1p1 /mnt/boot/efi
 # D2-B only:  mkdir -p /mnt/home && mount LABEL=guix-home /mnt/home
-swapon /dev/nvme0n1p2
 herd start cow-store /mnt          # store writes now go to the disk, not RAM
 #+end_src
+- No =swapon /dev/nvme0n1p2=: that partition is out of the picture (D5). The installer has 30 GiB of RAM and =cow-store= writes to the disk, so it does not need swap.
 
 ** 2.7 Swapfile and hibernation offset
-The recipe comes from the Guix manual's "Swap Space" section.
+The recipe comes from the Guix manual's "Swap Space" section. The file now lives inside the encrypted root, so it is encrypted along with everything else, and =filefrag= reports its offset *within the mapped device* — which is why =resume== names =/dev/mapper/cryptroot= in 2.8 and not a partition.
 #+begin_src sh
 dd if=/dev/zero of=/mnt/swapfile bs=1MiB count=16384 status=progress
 chmod 600 /mnt/swapfile && mkswap /mnt/swapfile && swapon /mnt/swapfile
@@ -351,10 +373,50 @@ git log -1 --oneline               # must be your 1.4 commit
 grep -n 'guix-root\|use-substitutes\|privileged' config-pc.scm   # guix-root present; no use-substitutes
 sed -i "s/resume_offset=[0-9]*/resume_offset=$OFF/" config-pc.scm
 grep -n 'resume_offset' config-pc.scm
+cryptsetup luksUUID /dev/nvme0n1p3 # the UUID the next edit needs
 mkdir -p /mnt/etc
 cp config-pc.scm /mnt/etc/config.scm
 cp signing-key.pub /mnt/etc/signing-key.pub   # /etc/config.scm refers to ./signing-key.pub
 #+end_src
+
+*The encryption edits (D5).* Four changes to =config-pc.scm=, all of them following the manual's own encrypted-root template. Make them in the clone, so =git diff= shows them and 3.14 commits them:
+1. add =mapped-devices=, with the UUID printed above:
+#+begin_src scheme
+ (mapped-devices
+  (list (mapped-device
+         (source (uuid "PASTE-THE-luksUUID-HERE"))
+         (target "cryptroot")
+         (type luks-device-mapping))))
+#+end_src
+2. point =/= at the label instead of the old ext4 UUID — =mkfs.ext4= in 2.5 gave it a new UUID anyway — and make it depend on the mapping:
+#+begin_src scheme
+                      (file-system
+                       (mount-point "/")
+                       (device (file-system-label "guix-root"))
+                       (type "ext4")
+                       (dependencies mapped-devices))
+#+end_src
+3. drop the =swap-space= for =nvme0n1p2=, keeping only the swap file:
+#+begin_src scheme
+ (swap-devices (list (swap-space (target "/swapfile")
+                                 (dependencies (filter (file-system-mount-point-predicate "/")
+                                                       file-systems)))))
+#+end_src
+4. resume from the mapped device:
+#+begin_src scheme
+ (kernel-arguments
+  (cons* "resume=/dev/mapper/cryptroot"
+         (string-append "resume_offset=" "PASTE-$OFF")
+         %default-kernel-arguments))
+#+end_src
+   (or just leave the literal =resume_offset=…= line that the =sed= above already updated, and change only the =resume== device).
+#+begin_src sh
+grep -n 'mapped-device\|cryptroot\|guix-root\|resume' config-pc.scm
+guix system build -L modules config-pc.scm --dry-run   # catches Scheme errors before 2.10
+cp config-pc.scm /mnt/etc/config.scm                   # copy again after editing
+#+end_src
+- =(dependencies mapped-devices)= refers to the field declared above it; that is how the manual's own template does it.
+- Nothing needs adding to =initrd-modules=: if a module were missing, =guix system= refuses and names it (=check-device-initrd-modules=).
 
 ** 2.9 Authorize nonguix, then pull guix and nonguix
 Only these two channels are needed here. =config-pc.scm= and =modules/nbl= import nothing from rde or guix-science, which you get later for your user profile. *Do not use =channels-lock.scm=.*
@@ -390,6 +452,13 @@ guix system init -L /mnt/root/guix-config/modules \
 - If nonguix has no substitute for the current =linux=, the kernel compiles locally, which takes about an hour on 14 cores.
 - It should end with =bootloader successfully installed on '(/boot/efi)'=.
 
+*Check the boot path before you reboot (D5).* This is the cheap moment to catch a mis-generated =grub.cfg=:
+#+begin_src sh
+grep -nE 'cryptomount|luks_script|insmod (luks|luks2|procfs)|cryptodisk' /mnt/boot/grub/grub.cfg
+#+end_src
+- =cryptomount -u <uuid-without-hyphens>= must be there, or GRUB cannot read =/boot= and you get a GRUB rescue prompt.
+- =initrd newc:etc/luks_script:(proc)/luks_script …= is the single-passphrase mechanism. If it is missing, the system still boots — it just asks twice.
+
 ** 2.11 Reboot
 #+begin_src sh
 reboot          # pull the USB stick out at the Lenovo logo
@@ -397,6 +466,8 @@ reboot          # pull the USB stick out at the Lenovo logo
 
 * Phase 3 — First boot and restore
 ** TODO 3.1 Set passwords
+*The first boot now starts with the LUKS prompt (D5).* GRUB asks once, slowly — it has no AES acceleration — and the kernel should not ask again. Asked twice? The key passing didn't happen; check the =grub.cfg= greps at the end of 2.10. GRUB rescue prompt instead? =cryptomount= is missing, or GRUB can't do argon2id on this firmware: see D5's =luksConvertKey= fallback.
+
 At the GDM screen press =Ctrl+Alt+F3=, log in as =root= (the password is empty; SSH password logins are disabled in your config, so this isn't exposed), then:
 #+begin_src sh
 passwd            # root
@@ -562,11 +633,13 @@ git diff                         # expect: resume_offset, channels-lock.scm, may
 git add -A config-pc.scm channels-lock.scm && git commit -m "pc: post-reinstall resume offset + fresh channel lock" && git push
 #+end_src
 
-** TODO 3.15 Done checklist [0/11]
+** TODO 3.15 Done checklist [0/13]
 - [ ] =guix describe= shows recent commits, and 3.2 prints =1=
 - [ ] Substitutes work: =guix build hello= downloads rather than builds
 - [ ] Wi-Fi, Bluetooth, sound, printing
-- [ ] Hibernation: =loginctl hibernate=, then resume
+- [ ] Hibernation: =loginctl hibernate=, then resume — and the LUKS passphrase is asked on the way back
+- [ ] =lsblk -f= shows =crypto_LUKS= on =nvme0n1p3= and the root mounted from =/dev/mapper/cryptroot=; =sudo cryptsetup luksDump /dev/nvme0n1p3= shows argon2id with =Memory: 262144=
+- [ ] The passphrase was asked *once* at boot (D5)
 - [ ] =tailscale status=
 - [ ] SSH into pc from another machine, after clearing its old host key (1.7)
 - [ ] The age key is back and the diary decrypts: =age -d ~/Documents/personal/diary/diary.org.age | head -1= (3.4)
@@ -653,3 +726,13 @@ done
 - Old daemon on this machine: =guix-1.5.0-2.520785e= (2026-03-09): unpatched
 - Manual-install and swap-offset commands are taken from =doc/guix.texi= at =e42227e= (the ISO's own manual)
 - The thinkpad (=config-thinkpad.scm=) is out of scope. If its daemon also predates July 2026, the same advisory applies to it.
+
+*Disk encryption (D5), checked 2026-10-04:*
+- Manual, mapped devices and =luks-device-mapping= (incl. =#:key-file=, =#:allow-discards?=, =#:extra-options=): https://guix.gnu.org/manual/en/html_node/Mapped-Devices.html
+- Manual, "Automatic LUKS Master Key Passing" — one prompt, no configuration: =info "(guix) Bootloader Configuration"=, node =grub-luks-root-device-key=. Verified in the installed guix: =gnu/bootloader/grub.scm= lines ~410/470/478/598 (=newc:etc/luks_script=, =cryptomount -u=, =insmod procfs luks luks2=, =GRUB_ENABLE_CRYPTODISK=y=) and =gnu/system/mapped-devices.scm= ~224–293 (=luks-script-lookup-key=, falls back to a prompt).
+- Manual, encrypted root at install time (=cryptsetup luksFormat= / =open= / =mkfs.ext4 -L=) and the swap-file =resume=/=resume_offset= recipe: nodes "Disk Partitioning" and "Swap Space". Guix's own system tests install an encrypted root with plain =cryptsetup luksFormat= (so LUKS2 + argon2id defaults): =gnu/tests/install.scm=.
+- GRUB 2.14 (Jan 2026) is the first release with argon2 for LUKS2; =guix show grub-efi= says 2.14. Release summary: https://ubuntuhandbook.org/index.php/2026/01/grub-boot-loader-2-14-released-with-argon2-tpm-2-0-key-protector/ · =cryptomount= manual: https://www.gnu.org/software/grub/manual/grub/html_node/cryptomount.html
+- Why the memory cost is lowered: GRUB's EFI allocations are capped below 4 GiB, and the 1 GiB argon2id default can leave a machine unbootable — https://github.com/CachyOS/distribution/issues/470 · tuning values (=--pbkdf-force-iterations 4 --pbkdf-memory 262100=): https://leo3418.github.io/collections/gentoo-config-luks2-grub-systemd/tune-parameters.html · Debian's cryptsetup FAQ on unlocking from GRUB: https://cryptsetup-team.pages.debian.net/cryptsetup/encrypted-boot.html
+- =/etc/luks_script= warnings after boot (cosmetic): Guix bug #81173, https://issues.guix.gnu.org/81173
+- Pre-2.14 advice, for context — LUKS1 + pbkdf2 because GRUB could not do argon2: https://kennyballou.com/blog/2025/05/installing-guix/index.html · https://issues.guix.gnu.org/51514 (LUKS2 root support) · https://issues.guix.gnu.org/25305 (encrypted root, unencrypted /boot)
+- =cryptsetup= 2.6.1 in the store has =luksConvertKey=, =--pbkdf-memory= and =--pbkdf-force-iterations= (checked with =--help=).
