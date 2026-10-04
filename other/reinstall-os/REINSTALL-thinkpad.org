@@ -656,6 +656,7 @@ make apply-guix-profile              # = guix package -m current-profile-manifes
 #+end_src
 - Don't regenerate or use =channels-lock.scm= here. The pc owns the lock, and until the pc runbook's step 3.7 it pins an unpatched Guix.
 - =nbl-emacs= (=modules/nbl=) has no substitutes, so it builds on the T460, with native compilation. On a dual-core, expect this to be the longest step. Let it run.
+- *2026-10-04: =texlive-scheme-full= and =texlive-sourcesanspro= left the shared manifest*, which takes about 4 GB off this download. The CV is typst now; what went with them is org's LaTeX fragment previews and =org-latex-pdf-process=, whose config is =COMMENT=-ed in =Emacs.org= (=latex setup=, =Auctex=, =org-fragtog=). =typst= is still in the manifest.
 - If a local build fails with =chown= / =Errno 22=, see [[*B. Troubleshooting][Troubleshooting]].
 - Then open a new login shell and run =fc-cache -f= (Guix's fontconfig, from =thinkpad-manifest.scm=).
 
