@@ -1,0 +1,654 @@
+#+title: Reinstall Guix System on =pc= from scratch
+#+subtitle: Lenovo ThinkCentre M70s Gen 6 — prepared 2026-09-21
+#+startup: content
+#+options: toc:2 num:t ^:nil
+#+todo: TODO NEXT WAIT | DONE SKIP
+#+property: header-args :eval no
+
+* Read this first
+** What this does
+It wipes =/dev/nvme0n1p3=, which holds =/=, =/home=, =/gnu=, =/nix= and =/swapfile=. It then reinstalls Guix System from your =guix-config= repo and restores your data and repos.
+
+The EFI partition (=nvme0n1p1=, UUID =9591-0188=) and the swap partition (=nvme0n1p2=, UUID =27b860cf-…=) are *kept as-is*, so their UUIDs in =config-pc.scm= stay valid.
+
+| Phase | Where                       | What                                              | Time          |
+|-------+-----------------------------+---------------------------------------------------+---------------|
+| [[*Phase 1 — Save everything (current system)][1]]     | current system              | commit/push, encrypted backups, prep config, USB | 1–2 h, hands-on |
+| [[*Phase 2 — Install from the live USB][2]]     | live USB                    | format =nvme0n1p3=, install                        | 1–2 h, mostly waiting |
+| [[*Phase 3 — First boot and restore][3]]     | new system                  | passwords, keys, repos, profiles, data            | 1–3 h         |
+
+** Why a reinstall fixes the problem
+Your daemon is running guix =520785e= from 2026-03-09, which is *unpatched* against the July 2026 =guix substitute= vulnerabilities. Upgrading it without substitutes failed because of the unprivileged daemon. The fix is to install from an ISO whose daemon is *already patched*. Substitutes are then safe from the very first minute, and nothing has to be built from source.
+
+|                        | Release ISO 1.5.0 (signed)  | Development ISO (*use this one*)                        |
+|------------------------+-----------------------------+---------------------------------------------------------|
+| guix-daemon inside     | predates the fix: vulnerable | =64d4de2= (2026-08-17): security fix + July-5 regression fix |
+| Substitutes during install | unsafe                  | safe                                                    |
+| Integrity check        | GPG signature               | HTTPS from =ci.guix.gnu.org= only (see below)           |
+
+- ISO used for this plan: CI build =24925386=, finished 2026-08-27, built from channel commit =e42227e= (2026-08-26). File size is =1308991488= bytes. Download: https://ci.guix.gnu.org/download/3964
+- Always-latest link: https://ci.guix.gnu.org/search/latest/ISO-9660?query=spec:images+status:success+system:x86_64-linux+image.iso
+  If that link now points to a newer build, that is fine. Any ISO built from a commit dated after 2026-07-05 contains both fixes, and step [[*2.4 Verify the ISO is patched — STOP if not][2.4]] confirms it on the machine itself.
+- *Integrity, honestly:* development ISOs are not GPG-signed, and neither build farm publishes a signed hash for them. Your trust rests on HTTPS to =ci.guix.gnu.org=. That's the same party whose signing key you already trust for every substitute. The signed 1.5.0 ISO is verifiable, but it would put you back on a vulnerable daemon, so it's the worse option.
+- An installed system defaults to =privileged? #t=, because "unprivileged is the default only on distros other than Guix System" (from the advisory). You make that choice explicitly in [[*D1 — daemon mode after the reinstall][D1]].
+
+** Rules for this file
+- Every code block has =:eval no=, so =C-c C-c= will not run anything. Copy commands on purpose.
+- Blocks marked *DESTRUCTIVE* erase data. Read them twice.
+- *This file must survive the wipe.* Commit and push it (GitHub renders =.org= files, so you can read it on your phone), *and* copy it to the backup drive.
+
+** Machine state when this was written (2026-09-21 ~19:00)
+- *Half-migrated daemon.* =/gnu/store= is owned by =root root= because the privileged-mode reconfigure ran at 18:47. But the *old* daemon is still running as uid 958 (=guix-daemon=) without =--build-users-group=. It cannot write the root-owned store, so every build fails until a reboot. That is fixed by [[*1.0 Reboot once][step 1.0]].
+- =config-pc.scm= and =/etc/config.scm= carry *TEMPORARY* lines: =(privileged? #t)= and =(use-substitutes? #f)=. Step [[*1.3 Prepare config-pc.scm for the new install][1.3]] replaces them.
+- =channels-lock.scm= pins guix =35e88b7=, which is *unpatched*. *Do not use it* for the install. It gets refreshed in step [[*3.7 Guix: pull, user profile, refresh the lock][3.7]].
+- =guix-config/signing-key.pub= is *nonguix's substitute key* (=C1FD53E5…=), not a key of this machine. A copy also lives at =/etc/signing-key.pub=, because =config-pc.scm= references =./signing-key.pub= relative to its own location.
+- Secure Boot is off (=SecureBoot=0=). Onboard Ethernet uses =e1000e=, which works on the installer's linux-libre kernel. Wi-Fi uses =iwlwifi=, which does *not*.
+
+** The cheaper alternative (no reinstall)
+Only if you change your mind:
+1. =sudo reboot=. The daemon comes up privileged with substitutes disabled, which is consistent and safe.
+2. =guix pull --no-channel-files --no-substitutes= takes hours. =python-minimal= passes now, because privileged builds get real UIDs.
+3. =guix pull --no-substitutes= pulls your full channel set, since the config needs nonguix.
+4. The final =reconfigure=: either build everything from source (very long, kernel included), or hand-run the freshly pulled =~/.config/guix/current/bin/guix-daemon= (its =GUIX= points to the patched substituter) and use substitutes. The second route is fiddly.
+5. Revert the TEMP lines, reconfigure, reboot.
+
+The reinstall trades those unattended hours, and the fiddly step 4, for about 1–2 h of careful backup work.
+
+* Decisions to make before starting
+** D1 — daemon mode after the reinstall
+- *Privileged (recommended; it's the Guix System default).* Just delete the =privileged?= line. Builds run as the =guixbuild= users, like on the build farm, so =--no-substitutes= builds work. That is exactly your fallback the next time an advisory lands.
+- *Unprivileged* =(privileged? #f)= is what you chose before, and it's a legitimate choice. The daemon doesn't run as root. But it *owns* =/gnu/store=, so a compromised daemon can already alter every binary you run, and the real gain is smaller than it looks. The cost: anything built locally may fail its test suite, because =chown= to an unmapped UID returns EINVAL instead of EPERM. Python, coreutils, Go and tar are known to hit this. That is exactly what blocked you. With a patched daemon, substitutes make local builds rare.
+- *Either way:* remove =(use-substitutes? #f)=.
+
+** D2 — disk layout
+- *A (recommended):* keep the partition table. Reformat only =nvme0n1p3= with the label =guix-root=.
+- *B (optional):* split =nvme0n1p3= into root (~350 GiB) and a separate =/home= (the rest), so the next reinstall can leave =/home= untouched. It adds steps in [[*2.5 Partition and format — DESTRUCTIVE][2.5]] and one =file-system= entry.
+
+** D3 — backup medium
+- An external drive with at least *20 GB* free. The home archive is roughly 12–15 GB before compression.
+- One *age passphrase* protects both archives. The archives contain your SSH and age private keys. *Write the passphrase on paper.* Without it the backup is useless.
+- If the drive is FAT32 (=vfat= in =df -T=), no single file can exceed 4 GiB. Use the =split= variant in [[*1.6 Back up home (encrypted)][1.6]].
+
+** D4 — network during the install
+- Plug an *Ethernet cable* into the onboard port. The installer can't use your Wi-Fi.
+- Fallback: *USB tethering* from your phone shows up as =usb0= or =enp…u…=.
+
+* Phase 1 — Save everything (current system)
+** TODO 1.0 Reboot once
+This fixes the half-migrated daemon. Afterwards the daemon runs as root with substitutes disabled, which is a consistent, safe state for this phase.
+#+begin_src sh
+sudo reboot
+# after login:
+ps -o user=,args= -C guix-daemon | cut -c1-160   # expect: root … --build-users-group guixbuild … --no-substitutes
+ls -ld /gnu/store                                # expect: root root
+#+end_src
+
+** TODO 1.1 Git repos: commit, push, rescue [0/10]
+Snapshot of what is at risk (the survey script is in [[*C. At-risk survey script][Appendix C]]). The backup in 1.6 also preserves all of this, stashes included, because they live in =.git=. Pushing matters because Phase 3 *clones fresh*.
+
+| Repo                                    | At risk                                                                                          | Action                                             |
+|-----------------------------------------+--------------------------------------------------------------------------------------------------+----------------------------------------------------|
+| =~/guix-config=                         | TEMP edits in =config-pc.scm= (*don't commit*); untracked =retry.sh=, =scripts/claude-sandbox/=, =verify.md=; ignored =.claude/=, =.config/.claude/= | 1.3 replaces the TEMP edits; commit the untracked files you want |
+| =~/.emacs.d=                            | =Emacs.org= modified (it's the *source* of =init.el=); 5 stashes (2025-07-25 … 2025-11-16)       | commit, push to =origin= *and* =downstream=; rescue stashes |
+| =~/shell-config=                        | =.bashrc= modified; 2 stashes (2025-08-31, 2025-11-16)                                           | commit + push; rescue stashes                      |
+| =~/Documents/public=                    | 6 modified files in =nbljaved.com/= (=publish.el=, blog post, generated html/atom)               | commit + push                                      |
+| =~/Documents/personal/personal-documents= | =resume/typst-grotesk-cv/ai-project.md= modified; 8 untracked entries (appraisal PDFs, =ai-project.tex/.pdf=, =ats-lab/=, =chatbot.md=, minted cache, stray file =tyle.cursort increase s=) | delete the stray file; commit what you want        |
+| ↳ submodule =jobs/natsoft/natsoft-activities= | untracked =activities.md=                                                                | commit + push *inside the submodule first*, then commit the pointer in the parent |
+| =~/Documents/leetcode=                  | 1 stash (2026-04-10 "list comprehension")                                                        | rescue stash                                       |
+| =~/.stumpwm.d=                          | 1 stash (2025-08-31 blueman-applet); ignored =winner-layouts/=, =history=                        | rescue stash; ignored files go in the backup       |
+| =~/Downloads/brilliant-cv=              | *NO REMOTE*: 1 local commit + 4 modified + 28 untracked (CV =.typ= sources, PDFs, logos)         | push to a new private repo, or rely on the backup |
+| =~/Downloads/test=                      | *NO REMOTE*, 0 commits, ~1,000 untracked files (CSV, site assets, marimo), 49 MB without =.venv= | backup only                                        |
+| =islam=, =diary=, =org/roam=, =nonguix=, =smolagents=, submodules | nothing                                                               | —                                                  |
+
+- [ ] =~/guix-config=: handled in 1.3 / 1.4
+- [ ] =~/.emacs.d=: commit =Emacs.org=, then =git push origin master && git push downstream master=
+- [ ] =~/.emacs.d=: 5 stashes rescued
+- [ ] =~/shell-config=: commit =.bashrc=, push, rescue 2 stashes
+- [ ] =~/Documents/public=: commit + push
+- [ ] =natsoft-activities=: commit + push inside the submodule
+- [ ] =personal-documents=: commit (incl. the submodule pointer) + push
+- [ ] =~/Documents/leetcode=: stash rescued
+- [ ] =~/.stumpwm.d=: stash rescued
+- [ ] =~/Downloads/brilliant-cv=: pushed, or consciously left to the backup
+
+Rescuing a stash — option A keeps it on the remote as a branch. Commit your normal work first so the working tree is clean:
+#+begin_src sh
+git stash list
+git stash show -p 'stash@{0}' | less
+git stash branch rescue/stash-0 'stash@{0}'      # new branch, stash applied and dropped
+git add -A && git commit -m "rescued stash: <message>" && git push -u origin rescue/stash-0
+git switch -                                     # back to your branch; repeat with stash@{0} for the next one
+#+end_src
+
+Option B exports every stash as a patch into =$HOME=, where the backup picks it up:
+#+begin_src sh
+r=$(basename "$PWD"); n=$(git stash list | wc -l)
+for i in $(seq 0 $((n-1))); do git stash show -p "stash@{$i}" > "$HOME/stash-$r-$i.patch"; done
+#+end_src
+
+Pushing =brilliant-cv= to a new private repo (it was cloned from a template, and its origin was removed):
+#+begin_src sh
+cd ~/Downloads/brilliant-cv
+git add -A && git commit -m "my CV"
+gh repo create nbljaved/brilliant-cv --private --source=. --push   # or create it on github.com and: git remote add origin …; git push -u origin master
+#+end_src
+
+** TODO 1.2 Capture live state into guix-config
+=make sync= refreshes =current-profile-manifest=, =nix-config/manifest.nix= and =attribute-manifest.nix=. It also *overwrites =config-pc.scm= from =/etc/config.scm=*. Today the two are identical, including the TEMP lines, and 1.3 fixes them next.
+#+begin_src sh
+cd ~/guix-config
+make sync
+git diff --stat
+#+end_src
+Do *not* regenerate =channels-lock.scm= now. It would pin the unpatched guix again.
+
+** TODO 1.3 Prepare config-pc.scm for the new install
+Three edits. First, the guix service block, which drops the TEMP lines. The variant below implements D1 = privileged. For unprivileged, add =(privileged? #f)=.
+#+begin_src scheme
+(guix-service-type config => (guix-configuration
+                              (inherit config)
+                              ;; D1: privileged daemon (Guix System default).
+                              ;; For unprivileged instead, add: (privileged? #f)
+                              (substitute-urls
+                               (append
+                                (list
+                                 "https://substitutes.nonguix.org")
+                                %default-substitute-urls))
+                              (authorized-keys
+                               (append
+                                (list
+                                 (local-file
+                                  "./signing-key.pub"))  ; nonguix's key
+                                %default-authorized-guix-keys))))
+#+end_src
+
+Second, the root file system by *label* rather than UUID, so no UUID has to be edited during the install. EFI and swap stay on their UUIDs, which don't change.
+#+begin_src scheme
+(file-system
+ (mount-point "/")
+ (device (file-system-label "guix-root"))
+ (type "ext4"))
+#+end_src
+For D2-B only, also add:
+#+begin_src scheme
+(file-system
+ (mount-point "/home")
+ (device (file-system-label "guix-home"))
+ (type "ext4"))
+#+end_src
+
+Third, =resume_offset=: leave the old number (=122318848=) in place. Step 2.7 replaces it with the new swapfile's offset.
+
+*Safety:* give the *current* root file system the same label, so this config is also valid for the running machine. This is non-destructive and works on a mounted file system. Then validate:
+#+begin_src sh
+sudo e2label /dev/nvme0n1p3 guix-root
+cd ~/guix-config
+guix system build -n --no-substitutes -L modules config-pc.scm   # dry-run only: catches typos, builds nothing
+#+end_src
+
+** TODO 1.4 Commit and push guix-config, including this file
+#+begin_src sh
+cd ~/guix-config
+git add REINSTALL-pc.org config-pc.scm current-profile-manifest nix-config/
+git add REINSTALL-thinkpad.org thinkpad-manifest.scm Makefile   # the T460 → Debian plan
+git add retry.sh scripts/claude-sandbox verify.md            # only the ones you want
+git commit -m "Prepare pc for reinstall: label root fs, drop TEMP daemon settings"
+git push
+git log origin/main -1 --oneline                             # must show this commit
+#+end_src
+
+** TODO 1.5 Re-run the at-risk survey
+Run the script from [[*C. At-risk survey script][Appendix C]]. Every line should say =ok=, or be something you have consciously left to the backup.
+
+** TODO 1.6 Back up home (encrypted)
+Mount the drive. In StumpWM run =udisksctl mount -b /dev/sdX1=, which mounts it under =/run/media/nabeel/…=.
+#+begin_src sh
+BK=/run/media/nabeel/BACKUP/pc-2026-09      # <- adjust
+mkdir -p "$BK" && df -hT "$BK"               # >= 20 GB free; note the Type column
+
+cd /home
+tar -cpf - \
+  --exclude=nabeel/.cache \
+  --exclude=nabeel/.local/share/Trash \
+  --exclude=nabeel/.local/share/containers \
+  --exclude=nabeel/.npm \
+  --exclude=nabeel/.rustup \
+  --exclude=nabeel/.cargo/registry \
+  --exclude=nabeel/.cargo/git \
+  --exclude=nabeel/go/pkg \
+  --exclude=nabeel/.bun \
+  --exclude=nabeel/.local/share/uv \
+  --exclude=nabeel/.local/share/pnpm \
+  --exclude=nabeel/.emacs.d/elpaca \
+  --exclude=nabeel/Downloads/test/.venv \
+  --exclude=node_modules \
+  nabeel \
+| zstd -T0 -3 \
+| age -p > "$BK/home-nabeel.tar.zst.age"
+#+end_src
+- For a FAT32 drive, replace the last line with: =| age -p | split -b 3900M - "$BK/home-nabeel.tar.zst.age.part-"=
+- Excluded items can all be re-downloaded: caches, toolchains, the 13 GB of podman storage (rebuilt with =make distrobox=), and elpaca's 206 package repos (re-cloned on first Emacs start).
+- Kept on purpose: =~/.config/google-chrome= (5.1 GB). Add =--exclude=nabeel/.config/google-chrome= if Chrome sync covers you.
+- =tar: … Permission denied= warnings mean root-owned leftovers in =~=. Read them, but they are usually caches.
+
+** TODO 1.7 Back up system-level state (sudo, encrypted)
+This covers SSH host keys (so other machines don't warn "host identification changed"), Tailscale identity, Wi-Fi profiles, and the live config. =/etc/guix= is deliberately left out: its ACL is regenerated from the config, and this machine's own archive key is not trusted anywhere.
+#+begin_src sh
+sudo -v
+sudo tar -cpf - /etc/ssh/ssh_host_* /var/lib/tailscale /etc/NetworkManager/system-connections \
+               /etc/config.scm /etc/signing-key.pub \
+| age -p > "$BK/system.tar.age"
+cp ~/guix-config/REINSTALL-pc.org "$BK/"
+#+end_src
+
+** TODO 1.8 Verify the backups
+#+begin_src sh
+set -o pipefail
+age -d "$BK/home-nabeel.tar.zst.age" | zstd -dc | tar -tf - > /tmp/home-list.txt && echo ARCHIVE-OK
+wc -l < /tmp/home-list.txt
+for f in .ssh/id_ed25519 .age/key .emacs.d/Emacs.org Downloads/brilliant-cv/cv.typ qa-questions.org; do
+  grep -qx "nabeel/$f" /tmp/home-list.txt && echo "ok  $f" || echo "MISSING  $f"
+done
+grep -c '^nabeel/.emacs.d/.git/' /tmp/home-list.txt     # > 0: stashes and history are inside
+rm /tmp/home-list.txt
+age -d "$BK/system.tar.age" | tar -tvf -                 # lists ssh host keys, tailscale, NM profiles
+#+end_src
+- [ ] =ARCHIVE-OK= printed, and no =MISSING= lines
+- [ ] system archive lists =etc/ssh=, =var/lib/tailscale=, =etc/NetworkManager/system-connections=
+- [ ] passphrase written on paper
+
+** TODO 1.9 Download the ISO and write the USB stick
+#+begin_src sh
+curl -L -o ~/guix-install.iso https://ci.guix.gnu.org/download/3964
+stat -c %s ~/guix-install.iso                 # 1308991488 for build 24925386
+sha256sum ~/guix-install.iso | tee -a "$BK/iso.sha256"
+
+lsblk -o NAME,SIZE,MODEL,TRAN,MOUNTPOINTS      # find the USB stick: TRAN=usb, e.g. sdb
+#+end_src
+*DESTRUCTIVE*, and only for the stick. Never =nvme0n1=, never the backup drive:
+#+begin_src sh
+sudo umount /dev/sdX?* 2>/dev/null
+sudo dd if=~/guix-install.iso of=/dev/sdX bs=4M status=progress conv=fsync
+#+end_src
+
+** TODO 1.10 Pre-flight checklist [0/8]
+- [ ] The survey (1.5) shows nothing you care about as unsaved
+- [ ] =guix-config= is pushed, with the 1.3 changes and this file (=git log origin/main -1=)
+- [ ] Both archives are verified (1.8), and the passphrase is on paper
+- [ ] This file is on the backup drive, and readable on GitHub from your phone
+- [ ] The USB stick is written
+- [ ] The Ethernet cable is plugged in (or the phone is ready for USB tethering)
+- [ ] *The backup drive is unplugged*, so it cannot be formatted by mistake
+- [ ] You can log in to GitHub another way if the SSH key restore fails (password or PAT)
+
+* Phase 2 — Install from the live USB
+** 2.1 Boot the USB
+Insert the stick, power on, press *F12* (the ThinkCentre boot menu) and pick the USB entry. *F1* opens BIOS setup if needed. Secure Boot is already off.
+
+** 2.2 Get a root shell
+On the installer's welcome screen choose *"Install using the shell based process"*, which switches to a root shell on TTY3. =Ctrl+Alt+F3= also works at any time.
+
+** 2.3 Network
+#+begin_src sh
+ip -br link                       # onboard Ethernet starts with "e" (today: enp128s31f6)
+ip link set enp128s31f6 up
+dhcpcd enp128s31f6
+ping -c 3 gnu.org
+#+end_src
+- Wi-Fi will not appear, because Intel Wi-Fi needs non-free firmware. That's expected.
+- Phone tethering: plug in the phone, enable USB tethering, check =ip -br link= for the new interface, then run =dhcpcd <iface>=.
+- Optional: finish the install over SSH from another machine with =passwd=, then =herd start ssh-daemon=.
+
+** 2.4 Verify the ISO is patched — STOP if not
+#+begin_src sh
+G=$(ps -o args= -C guix-daemon | awk 'NR==1{print $1}' | sed 's#/bin/guix-daemon$##'); echo "$G"
+grep -c 'define (rename-file\*' "$G/share/guile/site/3.0/guix/scripts/substitute.scm"   # must print 1
+guix describe          # if it prints a commit: e42227e… for build 24925386 (or newer)
+#+end_src
+- =$G= should end in =guix-1.5.0-<n>.64d4de2=, or a newer commit.
+- If grep prints =0=, or the path ends in =.520785e=: *STOP*. It's the wrong ISO. Don't download anything with it.
+
+** 2.5 Partition and format — DESTRUCTIVE
+Confirm the layout matches first. If anything differs, *STOP*.
+#+begin_src sh
+lsblk -f
+# expect: nvme0n1p1 vfat 9591-0188 · nvme0n1p2 swap 27b860cf-… · nvme0n1p3 ext4 41a31ef0-…
+#+end_src
+*Point of no return.* After the next command, your old =/=, =/home=, =/gnu= and =/nix= are gone.
+
+D2-A (recommended):
+#+begin_src sh
+mkfs.ext4 -L guix-root /dev/nvme0n1p3
+#+end_src
+Do *not* touch =p1= or =p2=: no =mkfs.fat=, no =mkswap=. That keeps the UUIDs =config-pc.scm= refers to.
+
+D2-B (separate =/home=): run =cfdisk /dev/nvme0n1=, delete =nvme0n1p3=, create a new =p3= (~350G, type "Linux filesystem"), create =p4= from the remaining space, then Write and Quit. Then:
+#+begin_src sh
+mkfs.ext4 -L guix-root /dev/nvme0n1p3
+mkfs.ext4 -L guix-home /dev/nvme0n1p4
+#+end_src
+
+** 2.6 Mount and start cow-store
+#+begin_src sh
+mount LABEL=guix-root /mnt
+mkdir -p /mnt/boot/efi && mount /dev/nvme0n1p1 /mnt/boot/efi
+# D2-B only:  mkdir -p /mnt/home && mount LABEL=guix-home /mnt/home
+swapon /dev/nvme0n1p2
+herd start cow-store /mnt          # store writes now go to the disk, not RAM
+#+end_src
+
+** 2.7 Swapfile and hibernation offset
+The recipe comes from the Guix manual's "Swap Space" section.
+#+begin_src sh
+dd if=/dev/zero of=/mnt/swapfile bs=1MiB count=16384 status=progress
+chmod 600 /mnt/swapfile && mkswap /mnt/swapfile && swapon /mnt/swapfile
+OFF=$(filefrag -e /mnt/swapfile | grep '^ *0:' | cut -d: -f3 | cut -d. -f1 | tr -d ' ')
+echo "resume_offset=$OFF"          # a number; used in 2.8
+#+end_src
+
+** 2.8 Fetch guix-config and finalise the config
+The ISO has no =git=, so =guix shell= fetches it through the patched daemon.
+#+begin_src sh
+mkdir -p /mnt/root && cd /mnt/root
+guix shell git -- git clone https://github.com/nbljaved/guix-config.git
+cd /mnt/root/guix-config
+git log -1 --oneline               # must be your 1.4 commit
+grep -n 'guix-root\|use-substitutes\|privileged' config-pc.scm   # guix-root present; no use-substitutes
+sed -i "s/resume_offset=[0-9]*/resume_offset=$OFF/" config-pc.scm
+grep -n 'resume_offset' config-pc.scm
+mkdir -p /mnt/etc
+cp config-pc.scm /mnt/etc/config.scm
+cp signing-key.pub /mnt/etc/signing-key.pub   # /etc/config.scm refers to ./signing-key.pub
+#+end_src
+
+** 2.9 Authorize nonguix, then pull guix and nonguix
+Only these two channels are needed here. =config-pc.scm= and =modules/nbl= import nothing from rde or guix-science, which you get later for your user profile. *Do not use =channels-lock.scm=.*
+#+begin_src sh
+guix archive --authorize < /mnt/root/guix-config/signing-key.pub   # nonguix substitute key
+
+cat > /tmp/install-channels.scm <<'EOF'
+(cons (channel
+       (name 'nonguix)
+       (url "https://gitlab.com/nonguix/nonguix")
+       (introduction
+        (make-channel-introduction
+         "897c1a470da759236cc11798f4e0a5f7d4d59fbc"
+         (openpgp-fingerprint
+          "2A39 3FFF 68F4 EF7A 3D29  12AF 6F51 20A0 22FB B2D5"))))
+      %default-channels)
+EOF
+
+SUBS="https://ci.guix.gnu.org https://bordeaux.guix.gnu.org https://substitutes.nonguix.org"
+guix pull -C /tmp/install-channels.scm --substitute-urls="$SUBS"
+export PATH=/root/.config/guix/current/bin:$PATH; hash -r
+guix describe                       # guix + nonguix at recent commits
+#+end_src
+Passing the nonguix URL on the command line works with the patched daemon: client URLs are allowed but must be =https:=, and =file://= is rejected.
+
+** 2.10 guix system init
+#+begin_src sh
+guix system init -L /mnt/root/guix-config/modules \
+     /mnt/root/guix-config/config-pc.scm /mnt \
+     --substitute-urls="$SUBS"
+#+end_src
+- This downloads several GB and builds your =(nbl packages tailscale)= from source (Go), plus small system derivations.
+- If nonguix has no substitute for the current =linux=, the kernel compiles locally, which takes about an hour on 14 cores.
+- It should end with =bootloader successfully installed on '(/boot/efi)'=.
+
+** 2.11 Reboot
+#+begin_src sh
+reboot          # pull the USB stick out at the Lenovo logo
+#+end_src
+
+* Phase 3 — First boot and restore
+** TODO 3.1 Set passwords
+At the GDM screen press =Ctrl+Alt+F3=, log in as =root= (the password is empty; SSH password logins are disabled in your config, so this isn't exposed), then:
+#+begin_src sh
+passwd            # root
+passwd nabeel
+#+end_src
+Log out, switch back to GDM (=Ctrl+Alt+F7=, or F1), and log in as =nabeel= (StumpWM or Xfce).
+
+** TODO 3.2 Verify the installed daemon
+#+begin_src sh
+ps -o user=,args= -C guix-daemon | cut -c1-160
+ls -ld /gnu/store
+G=$(ps -o args= -C guix-daemon | awk 'NR==1{print $1}' | sed 's#/bin/guix-daemon$##'); echo "$G"
+grep -c 'define (rename-file\*' "$G/share/guile/site/3.0/guix/scripts/substitute.scm"   # must print 1
+#+end_src
+- D1 privileged: the user column is =root=, the args include =--build-users-group guixbuild=, and the store is =root root=.
+- D1 unprivileged: the user is =guix-daemon=, and the store is =guix-daemon guix-daemon=. The first boot logs "Changing to unprivileged guix-daemon."
+- There must be *no* =--no-substitutes= in the args.
+
+** TODO 3.3 Network
+Wi-Fi now works (nonguix kernel + =linux-firmware=). Either use =nmcli device wifi connect "<SSID>" --ask=, or restore your old profiles in 3.11.
+
+** TODO 3.4 Restore secrets first
+#+begin_src sh
+udisksctl mount -b /dev/sdX1                        # the backup drive
+BK=/run/media/nabeel/BACKUP/pc-2026-09
+guix shell age zstd -- sh -c 'age -d "$1" | zstd -dc | tar -xpf - -C /home \
+   nabeel/.ssh nabeel/.age nabeel/.gitconfig nabeel/.config/git' _ "$BK/home-nabeel.tar.zst.age"
+chmod 700 ~/.ssh && chmod 600 ~/.ssh/id_ed25519
+ssh -T git@github.com                               # "Hi nbljaved! …"
+#+end_src
+
+** TODO 3.5 Clone your repos — where each one goes
+|  # | Location                                                      | Clone from                                                           | Visibility | Submodules                                                 |
+|----+---------------------------------------------------------------+----------------------------------------------------------------------+------------+------------------------------------------------------------|
+|  1 | =~/guix-config=                                                 | =git@github.com:nbljaved/guix-config.git=                              | public     | —                                                          |
+|  2 | =~/shell-config=                                                | =git@github.com:nbljaved/shell-config.git=                             | public     | —                                                          |
+|  3 | =~/.emacs.d=                                                    | =git@github.com:nbljaved/emacs-config.git=                             | public     | — (2nd remote =downstream=: =nbl-natsoft/emacs-config=)        |
+|  4 | =~/.stumpwm.d=                                                  | =git@github.com:nbljaved/stumpwm-config.git=                           | public     | =clx-truetype= (goose121), =modules= (stumpwm-contrib)         |
+|  5 | =~/org/roam=                                                    | =git@github.com:nbljaved/org-roam-files.git=                           | private    | —                                                          |
+|  6 | =~/Documents/leetcode=                                          | =git@github.com:nbljaved/leetcode.git=                                 | private    | —                                                          |
+|  7 | =~/Documents/islam=                                             | =git@github.com:nbljaved/islam.git=                                    | private    | —                                                          |
+|  8 | =~/Documents/public=                                            | =git@github.com:nbljaved/public.git=                                   | public     | HF space =agent_couse_Final_Assignment_Template= (=git@hf.co=) |
+|  9 | =~/Documents/personal/diary=                                    | =git@github.com:nbljaved/diary.git=                                    | private    | —                                                          |
+| 10 | =~/Documents/personal/personal-documents=                       | =git@github.com:nbljaved/personal-documents.git=                       | private    | =jobs/natsoft/natsoft-activities= (=nbl-natsoft=, private)     |
+|  — | =~/Downloads/brilliant-cv=                                      | your new private repo if you made one in 1.1; else the backup (3.13) | —          | —                                                          |
+|  — | =~/Downloads/test=, =~/Downloads/nonguix=, =~/Downloads/smolagents= | restored with =Downloads/= in 3.13                                     | —          | —                                                          |
+Visibility was checked on 2026-09-21 with anonymous HTTPS. Things that re-download by themselves: guix channel checkouts (=guix pull=), elpaca packages (first Emacs start), cargo checkouts.
+
+#+begin_src sh
+cd ~
+git clone                      git@github.com:nbljaved/guix-config.git          ~/guix-config
+git clone                      git@github.com:nbljaved/shell-config.git         ~/shell-config
+git clone                      git@github.com:nbljaved/emacs-config.git         ~/.emacs.d
+git -C ~/.emacs.d remote add downstream git@github.com:nbl-natsoft/emacs-config.git
+git clone --recurse-submodules git@github.com:nbljaved/stumpwm-config.git       ~/.stumpwm.d
+git clone                      git@github.com:nbljaved/org-roam-files.git       ~/org/roam
+git clone                      git@github.com:nbljaved/leetcode.git             ~/Documents/leetcode
+git clone                      git@github.com:nbljaved/islam.git                ~/Documents/islam
+git clone --recurse-submodules git@github.com:nbljaved/public.git               ~/Documents/public
+git clone                      git@github.com:nbljaved/diary.git                ~/Documents/personal/diary
+git clone --recurse-submodules git@github.com:nbljaved/personal-documents.git   ~/Documents/personal/personal-documents
+#+end_src
+- Clone =~/.emacs.d= *before* starting Emacs for the first time.
+- Submodules on a detached HEAD are normal.
+- If the HF submodule fails (your key isn't registered on huggingface.co), the parent clone still succeeds. Run =git submodule update --init= later, or switch that submodule's URL to =https://huggingface.co/spaces/nbljaved/agent_couse_Final_Assignment_Template= (it's public).
+
+** TODO 3.6 Recreate symlinks
+These are the symlinks that existed on 2026-09-21:
+#+begin_src sh
+ln -sf  ~/shell-config/.bashrc                ~/.bashrc
+ln -sf  ~/shell-config/.bash_profile          ~/.bash_profile
+ln -sf  ~/shell-config/.blerc                 ~/.blerc
+ln -sfn ~/shell-config/kitty                  ~/.config/kitty
+ln -sf  ~/shell-config/starship/starship.toml ~/.config/starship.toml
+mkdir -p ~/.config/guix
+ln -sf  ~/guix-config/channels.scm            ~/.config/guix/channels.scm
+ln -sf  ~/guix-config/nix-config/nix-channels ~/.nix-channels
+mkdir -p ~/.claude/skills/screenshot
+ln -sf  ~/guix-config/.config/useful-docker-images/shot-scraper/claude-skills/shot-scraper.md ~/.claude/skills/screenshot/SKILL.md
+# after ~/quicklisp is restored (3.9):
+ln -sfn ~/.stumpwm.d/clx-truetype             ~/quicklisp/local-projects/clx-truetype
+#+end_src
+Open a new terminal afterwards so the new =.bashrc= loads.
+
+** TODO 3.7 Guix: pull, user profile, refresh the lock
+#+begin_src sh
+guix pull                                   # full channels.scm: guix, nonguix, rde, guix-science(+nonfree), guix-past
+hash -r; guix describe
+cd ~/guix-config
+guix describe -f channels > channels-lock.scm   # replaces the lock that pinned unpatched 35e88b7
+make apply-guix-profile                     # guix package -m current-profile-manifest -L modules
+#+end_src
+Reconfiguring later: root has never pulled, and the bare system guix cannot load your config because nonguix is missing. So reconfigure with *your* guix:
+#+begin_src sh
+sudo ~/.config/guix/current/bin/guix system reconfigure -L ~/guix-config/modules /etc/config.scm
+#+end_src
+
+** TODO 3.8 Emacs
+=Emacs.org= tangles =init.el=, =early-init.el=, =~/.roswell/init.lisp= and =~/.slynkrc=.
+#+begin_src sh
+emacs --batch --eval "(require 'org)" --eval '(org-babel-tangle-file "~/.emacs.d/Emacs.org")'
+emacs      # first start: elpaca clones and builds ~200 packages. Let it finish, then restart Emacs.
+#+end_src
+
+** TODO 3.9 StumpWM and Common Lisp
+Restore =~/quicklisp= and =~/.sbclrc= from the backup (3.13) instead of reinstalling Quicklisp, then create the =clx-truetype= link from 3.6. If you'd rather start fresh, follow =~/.stumpwm.d/Readme.org= (https://www.quicklisp.org/beta/).
+
+** TODO 3.10 Nix
+#+begin_src sh
+source /run/current-system/profile/etc/profile.d/nix.sh
+nix-channel --update
+cd ~/guix-config && make apply-nix-profile
+#+end_src
+
+** TODO 3.11 Tailscale, SSH host keys, Wi-Fi profiles (sudo)
+Restoring Tailscale state keeps pc's identity and IP. The alternative is =sudo tailscale up=, then deleting the old "pc" node in the admin console.
+#+begin_src sh
+sudo -v
+sudo herd stop tailscaled
+guix shell age -- age -d "$BK/system.tar.age" \
+  | sudo tar -xpf - -C / etc/ssh var/lib/tailscale etc/NetworkManager/system-connections
+sudo herd start tailscaled
+sudo herd restart ssh-daemon
+sudo herd restart network-manager
+tailscale status
+#+end_src
+
+** TODO 3.12 Containers
+#+begin_src sh
+cd ~/guix-config && make distrobox          # rebuilds the Arch image and recreates the 'arch' container
+#+end_src
+The shot-scraper image: see =~/guix-config/.config/useful-docker-images/shot-scraper/=.
+
+** TODO 3.13 Restore the remaining data
+Extract the whole archive to a staging directory and copy back what you want:
+#+begin_src sh
+mkdir -p ~/restore && cd ~/restore
+guix shell age zstd -- sh -c 'age -d "$1" | zstd -dc | tar -xpf -' _ "$BK/home-nabeel.tar.zst.age"
+O=~/restore/nabeel
+rsync -a "$O/Downloads/"            ~/Downloads/           # incl. brilliant-cv, test, nonguix, smolagents (with .git)
+rsync -a "$O/Calibre Library"       ~/
+rsync -a "$O/.librewolf" "$O/.telega" "$O/.claude" "$O/.claude.json" "$O/.gemini" "$O/.zai" \
+         "$O/.mullvad" "$O/.pki" "$O/.android" "$O/quicklisp" "$O/.roswell" "$O/src" "$O/.fonts" "$O/Desktop" ~/
+rsync -a "$O/.sbclrc" "$O/.slynkrc" "$O/.Xresources" "$O/.Xdefaults" "$O/.fehbg" \
+         "$O/.bash_history" "$O/.org-timestamps" "$O/qa-questions.org" "$O/guix-home-config.scm" ~/
+mkdir -p ~/.config ~/.local/share
+rsync -a "$O/.config/google-chrome" "$O/.config/opencode" "$O/.config/rclone" "$O/.config/calibre" \
+         "$O/.config/libreoffice" "$O/.config/xfce4" ~/.config/
+rsync -a "$O/.local/share/TelegramDesktop" "$O/.local/share/opencode" "$O/.local/share/fonts" ~/.local/share/
+fc-cache -f
+# ignored-but-useful files inside repos:
+rsync -a "$O/guix-config/.claude" ~/guix-config/;  rsync -a "$O/guix-config/.config/.claude" ~/guix-config/.config/
+rsync -a "$O/.stumpwm.d/winner-layouts" "$O/.stumpwm.d/history" ~/.stumpwm.d/
+rsync -a "$O/Documents/public/.claude" ~/Documents/public/
+ls ~/stash-*.patch 2>/dev/null   # if you used option B in 1.1, copy these from $O
+#+end_src
+- Close browsers before restoring their profiles.
+- Compare anything else with =diff <(ls -A "$O") <(ls -A ~)=.
+- When you're satisfied: =rm -rf ~/restore= (it contains your keys). Keep the backup drive for a few weeks.
+
+** TODO 3.14 Commit the post-install changes
+#+begin_src sh
+cd ~/guix-config
+git diff                         # expect: resume_offset, channels-lock.scm, maybe manifests
+git add -A config-pc.scm channels-lock.scm && git commit -m "pc: post-reinstall resume offset + fresh channel lock" && git push
+#+end_src
+
+** TODO 3.15 Done checklist [0/10]
+- [ ] =guix describe= shows recent commits, and 3.2 prints =1=
+- [ ] Substitutes work: =guix build hello= downloads rather than builds
+- [ ] Wi-Fi, Bluetooth, sound, printing
+- [ ] Hibernation: =loginctl hibernate=, then resume
+- [ ] =tailscale status=
+- [ ] SSH into pc from another machine with no host-key warning
+- [ ] =distrobox enter arch=, podman
+- [ ] Nix packages on =PATH=
+- [ ] Emacs starts cleanly; the StumpWM session works
+- [ ] xremap: =sudo xremap --watch=device,config ~/guix-config/.config/xremap/xremap.yaml= (you started it by hand from a terminal before; no launcher exists in your repos)
+
+* Appendix
+** A. Repo inventory (2026-09-21)
+- 18 personal repos and submodules, listed in 1.1 and 3.5.
+- 206 elpaca package repos under =~/.emacs.d/elpaca/repos=. Only 3 have changes, and those are regenerated =*-autoloads.el= files, so all are disposable.
+- =~/.cargo/git/checkouts/*= is cargo's cache and disposable.
+
+** B. Non-git data inventory (2026-09-21)
+| What                                                   | Size   | Why it matters                        | In backup |
+|--------------------------------------------------------+--------+---------------------------------------+-----------|
+| =~/.ssh= (=id_ed25519=)                                | 24K    | GitHub access to your private repos   | yes       |
+| =~/.age= (=key=)                                       | 12K    | decrypts your age-encrypted files     | yes       |
+| =~/.claude=, =~/.claude.json=                          | 235M   | Claude Code settings, memory, history | yes       |
+| =~/.gemini=, =~/.zai=, =~/.config/opencode=, =~/.local/share/opencode= | ~15M | AI tool configs and credentials | yes |
+| =~/.mullvad=, =~/.config/rclone=, =~/.pki=             | ~40M   | VPN, rclone remotes, NSS certificates | yes       |
+| =~/.librewolf=                                         | 834M   | bookmarks, passwords, sessions        | yes       |
+| =~/.config/google-chrome=                              | 5.1G   | profile (unless Chrome sync)          | yes       |
+| =~/.telega=, =~/.local/share/TelegramDesktop=          | 433M   | Telegram sessions and files           | yes       |
+| =~/Downloads= (loose files)                            | 151M   | personal documents, tickets, resumes  | yes       |
+| =~/Calibre Library=, =~/.config/calibre=               | 2.5M   | e-book library                        | yes       |
+| =~/.local/share/fonts=, =~/.fonts=                     | 104M   | user fonts                            | yes       |
+| =~/qa-questions.org=, =~/guix-home-config.scm=         | small  | loose files in =~=                    | yes       |
+| =~/.bash_history=, =~/.org-timestamps=, =~/.Xresources=, =~/.sbclrc=, =~/.slynkrc= | small | history and small configs | yes |
+| =~/quicklisp=, =~/.roswell=                            | 178M   | Lisp setup (saves reinstalling)       | yes       |
+| SSH host keys, =/var/lib/tailscale=, NM profiles       | small  | host identity, tailnet node, Wi-Fi    | system.tar.age |
+| =~/.local/share/containers=                            | 13G    | rebuilt with =make distrobox=         | no        |
+| =/nix=                                                 | 21G    | rebuilt with =make apply-nix-profile= | no        |
+| =~/.cache=, Trash, =.npm=, =.rustup=, =go/pkg=, =.bun=, uv, pnpm | ~16G | caches and toolchains      | no        |
+
+** C. At-risk survey script
+Save it as =~/repo-risk.sh= and run it with =bash ~/repo-risk.sh=. It's read-only.
+#+begin_src sh
+#!/usr/bin/env bash
+# repo-risk: every git repo under $HOME and what would be lost if $HOME vanished.
+cd "$HOME" || exit 1
+find . \( -path ./.cache -o -path ./.local/share/containers -o -path ./.local/share/Trash \
+          -o -path ./.emacs.d/elpaca -o -path ./.cargo -o -path ./.rustup -o -path ./go/pkg \
+          -o -name node_modules \) -prune \
+       -o -name .git -print 2>/dev/null | sed 's#^\./##; s#/\.git$##' | sort |
+while read -r r; do
+  cd "$HOME/$r" || continue
+  out=""
+  [ -z "$(git remote 2>/dev/null)" ] && out+=" NO-REMOTE"
+  n=$(git status --porcelain 2>/dev/null | wc -l);   [ "$n" -gt 0 ] && out+=" uncommitted:$n"
+  s=$(git stash list 2>/dev/null | wc -l);           [ "$s" -gt 0 ] && out+=" stashes:$s"
+  u=$(git rev-list --count --branches --not --remotes 2>/dev/null)
+  [ "${u:-0}" -gt 0 ] && out+=" unpushed-commits:$u"
+  printf '%-62s %s\n' "$r" "${out:- ok}"
+done
+#+end_src
+
+** D. Troubleshooting
+- *No network in the installer:* Wi-Fi is expected to fail. Check the cable and =ip -br link=, and try =dhcpcd= on the right interface, or phone tethering.
+- *Black screen on the ISO:* at GRUB press =e= and add =nomodeset= to the =linux= line.
+- *=guix system init= builds the kernel or firmware from source:* the nonguix key isn't authorized, or =$SUBS= was lost (new shell). Re-run the =guix archive --authorize= line and =SUBS=…, then init again.
+- *"no file system with label guix-root":* check =e2label /dev/nvme0n1p3=. The label must match the config exactly.
+- *"no such file: signing-key.pub":* it must sit next to whichever config file you pass. See 2.8.
+- *Tests fail with =OSError: [Errno 22] Invalid argument= / chown:* you're building from source on an *unprivileged* daemon. Use substitutes, or switch D1 to privileged.
+- *Swap partition missing at boot:* you ran =mkswap= on =p2= and its UUID changed. Update the =27b860cf-…= UUID from =blkid=.
+- *Hibernation doesn't resume:* =resume_offset= is wrong. Recompute it with the 2.7 command (on the running system: =sudo filefrag -e /swapfile=), then reconfigure.
+- *Machine boots into the old GRUB entry, or no entry:* boot the USB, mount as in 2.6, and re-run 2.10. Or inspect with =efibootmgr -v=.
+- *=sudo guix system reconfigure= says =linux: unbound variable=:* that's the system guix without nonguix. Use the command at the end of 3.7.
+
+** E. Facts and sources
+- Advisory: https://guix.gnu.org/en/blog/2026/guix-substitute-pull-vulnerabilities/ (fix =897832f=, 2026-07-02; regression fixed 2026-07-05)
+- Regression (unprivileged daemon, July 2–5): https://codeberg.org/guix/guix/issues/9686 — the workaround: https://lunabee.space/office/guix-daemon.html
+- =--no-substitutes= build failures: https://codeberg.org/guix/guix/issues/9856 · LWN: https://lwn.net/Articles/1081199/
+- Unprivileged-daemon build hazards: https://github.com/bitcoin/bitcoin/issues/36239
+- ISO: CI build 24925386 (eval 2199361), channel commit =e42227e1c7e7055e27cecada52ec801a75e44909=, daemon =64d4de2a920445e5992f020e56490f5fcbdbba7c=, store path =bnx9bv678qj0hcagcn2wmn168na8jn50-image.iso=, 1308991488 bytes
+- Old daemon on this machine: =guix-1.5.0-2.520785e= (2026-03-09): unpatched
+- Manual-install and swap-offset commands are taken from =doc/guix.texi= at =e42227e= (the ISO's own manual)
+- The thinkpad (=config-thinkpad.scm=) is out of scope. If its daemon also predates July 2026, the same advisory applies to it.

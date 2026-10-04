@@ -1,0 +1,962 @@
+#+title: Move =thinkpad= (T460) to Debian 13 + Guix
+#+subtitle: Lenovo ThinkPad T460 — prepared 2026-09-21, facts re-checked 2026-10-03
+#+startup: content
+#+options: toc:2 num:t ^:nil
+#+todo: TODO NEXT WAIT | DONE SKIP
+#+property: header-args :eval no
+
+* Read this first
+** What this does
+It wipes the T460's whole disk and installs Debian 13 "trixie" with full-disk encryption (LUKS), and with hibernation rather than Secure Boot ([[*D7 — Secure Boot or hibernation][D7]]). It then installs Guix on top from a *patched* CI tarball. After that:
+
+- *Debian owns* anything that runs as root or checks a password: kernel, firmware, bootloader, X server, =i3lock=, NetworkManager, PipeWire, Bluetooth and Tailscale. Security fixes arrive through =unattended-upgrades=.
+- *Guix owns* your user environment: StumpWM, Emacs, kitty, and the shared =current-profile-manifest= plus =thinkpad-manifest.scm=.
+
+| Phase | Where                | What                                                    | Time                       |
+|-------+----------------------+---------------------------------------------------------+----------------------------|
+| [[*Phase 0 — Prerequisites][0]]     | pc                   | push this plan; the pc reinstall can wait               | —                          |
+| [[*Phase 1 — Save everything (T460, current system)][1]]     | T460, current system | survey, commit/push, encrypted backup                   | ~1 h                       |
+| [[*Phase 2 — Prepare the USB stick (on the pc)][2]]     | pc                   | download and verify the Debian ISO, write the USB stick | ~20 min                    |
+| [[*Phase 3 — Install Debian (T460)][3]]     | T460                 | BIOS settings, Debian install                           | ~1 h, mostly the disk wipe |
+| [[*Phase 4 — Base system (T460, Debian)][4]]     | T460                 | updates, firmware, firewall, host packages, hibernation | ~1 h                       |
+| [[*Phase 5 — Install Guix (T460)][5]]     | T460                 | Guix from the patched tarball, then verify it           | 30–60 min                  |
+| [[*Phase 6 — Your environment (T460)][6]]     | T460                 | keys, repos, Guix profile, StumpWM session, data        | 2–4 h, mostly waiting      |
+| [[*Phase 7 — Services and extras (T460)][7]]     | T460                 | Tailscale, optional xremap                              | ~20 min                    |
+| [[*Phase 8 — Wrap up][8]]     | T460                 | retire =config-thinkpad.scm=, done checklist              | ~10 min                    |
+
+** The one rule behind the design
+The Guix daemon runs *unprivileged* here, as the =guix-daemon= user (see [[*D1 — Guix daemon mode][D1]]). It owns =/gnu/store=, so if it were ever compromised, the attacker could alter anything in the store. On Debian that means your Guix *apps*, not the OS, as long as *root never runs a store binary*. The one exception you can't avoid is =sudo -i guix pull=, which is how the daemon gets updated.
+
+That is why =tailscaled=, =i3lock=, the X server and the rest of the root-side software come from apt, not Guix.
+
+** Why a CI tarball instead of the signed release
+By default, =guix-install.sh= downloads the latest *release* tarball, which is 1.5.0. Like the 1.5.0 ISO, it predates the July 2026 =guix substitute= fix.
+
+|                    | 1.5.0 release tarball (the installer's default) | CI tarball (*use this one*)                                  |
+|--------------------+-------------------------------------------------+--------------------------------------------------------------|
+| guix-daemon inside | predates the fix: vulnerable                    | =guix-1.5.0-7.5ceffb6=: patched, and newer than the pc's ISO daemon |
+| Integrity check    | GPG signature, checked by the installer         | HTTPS from =ci.guix.gnu.org= only                             |
+
+- Tarball used for this plan: CI build =25622019= (eval =2208682=), finished 2026-09-25 18:29 UTC and built from channel commit =825f0743=. File size is =147244972= bytes, served as =slnb56lpyly2q537mg69nshbpxblvic6-guix-binary.tar.xz=. Download: https://ci.guix.gnu.org/download/4029
+- *Checked on 2026-10-03* by streaming that tarball and unpacking two files from it:
+  - It contains =/gnu/store/sn3zyi4kjw5d4axk85d9814fl7qmnvqz-guix-1.5.0-7.5ceffb6=.
+  - Its =substitute.scm= carries the fix marker used in [[*5.3 Verify the daemon — STOP if not patched][5.3]]: the =grep= there prints =1=.
+  - Its systemd unit has =User=guix-daemon=, with =ExecStart= from =/var/guix/profiles/per-user/root/current-guix/bin/guix-daemon=.
+- The build this plan first used, =25470813= (https://ci.guix.gnu.org/download/4002, =145373948= bytes, =guix-1.5.0-6.64d4de2=), was still being served on 2026-10-03. It's also patched, so it works as a fallback if =/download/4029= disappears.
+- *Integrity, honestly:* the trade-off is the same one you made for the pc's ISO. When =GUIX_BINARY_FILE_NAME= is set, the installer skips its GPG step entirely (checked in the script). Your trust rests on HTTPS to =ci.guix.gnu.org=, the same party whose key signs every substitute you accept.
+
+** Rules for this file
+- Every code block has =:eval no=, so =C-c C-c= will not run anything. Copy commands on purpose.
+- Blocks marked *DESTRUCTIVE* erase data. Read them twice.
+- It must survive the wipe: commit and push it (GitHub renders =.org= files, so you can read it on your phone), *and* copy it to the backup drive.
+
+** Machine facts
+Fill in the blanks during [[*1.1 Record machine facts][1.1]].
+- Current OS: Guix System (=config-thinkpad.scm=). Its daemon may predate July 2026. *Until the wipe, never download anything with it*: no =guix pull=, =guix install= or =guix shell=. Phase 1 only uses tools that are already installed.
+- Disk: ______ · RAM: ______ · BIOS version: ______
+- The RAM figure is needed twice: hibernation wants swap at least that big, which 3.3 leaves room for and [[*4.7 Hibernation (D7)][4.7]] sets up.
+- Wi-Fi is Intel (=iwlwifi=). Unlike the Guix installer, Debian's installer loads the non-free firmware itself, so Wi-Fi works during the install. The netboot image in [[*E. Network boot instead of a USB stick][Appendix E]] doesn't include it: install over the cable.
+- The hostname must be =thinkpad=. The =Makefile= keys on it: on a thinkpad without Guix System, =make apply-guix-profile= adds =thinkpad-manifest.scm=, and =make sync= won't overwrite the shared manifest.
+
+* Decisions to make before starting
+** D1 — Guix daemon mode
+- *Unprivileged (recommended; the installer's default on Debian).* This differs from the pc's D1 on purpose:
+  - On Guix System the store /is/ the OS, so a daemon that owns the store is effectively root anyway.
+  - On Debian the OS lives outside the store, so the rule above keeps a daemon compromise at user level.
+  - Cost: local builds may fail their test suites (=chown= returns EINVAL; see the pc runbook's D1). With substitutes, local builds are rare here. =nbl-emacs= is the main one.
+- Privileged would mean hand-editing the systemd unit and creating =guixbuild= users. It's not covered here.
+
+** D2 — Where Tailscale comes from
+- *Tailscale's apt repo (recommended).* It's signed, and [[*7.1 Tailscale][7.1]] adds it to =unattended-upgrades=, so patches arrive automatically. You trust Tailscale's builds.
+- Your Guix source build keeps the build under your control. But =tailscaled= would then run as root from the store, which breaks the rule, and it only gets patched when you rebuild.
+
+** D3 — How X starts
+- *=startx= on tty1, no display manager (recommended).* It means fewer root components. Your login shell sources =/etc/profile.d/zzz-guix.sh=, so StumpWM starts with the full Guix environment, and X runs rootless through logind.
+- A display manager such as lightdm needs extra work to get Guix's environment into the session. It's not covered here.
+
+** D4 — SSH server on the laptop
+- *No (recommended).*
+- Yes: tick "SSH server" in [[*3.4 Software selection][3.4]]. The firewall then allows it only over the tailnet ([[*7.1 Tailscale][7.1]]).
+
+** D5 — GitHub SSH key
+- *A new key for this machine (recommended).* If the laptop is lost, you revoke just that key.
+- Restoring the T460's old key also works, but then remove the old one from GitHub later anyway.
+- =~/.age/key=: copy it over only if you need to decrypt age files on the laptop.
+
+** D6 — Nix
+- *Skip for now (recommended).* On Debian, =uv=, prebuilt wheels and vendor binaries run natively, which removes most of the reasons you use Nix on the pc.
+- Debian packages Nix 2.26 (=nix-setup-systemd=) if you miss it later. That's not covered here.
+
+** D7 — Secure Boot or hibernation
+You can't have both. Debian's kernel enters "lockdown" when Secure Boot is on, and lockdown disables hibernation and resume (see [[*D. Facts and sources (checked 2026-09-21)][Facts]]).
+- *Hibernation, with Secure Boot off (chosen 2026-10-03).* What you want protected is the data on the disk, and LUKS is what protects it. Hibernation writes RAM into the encrypted swap and powers the machine off, so the keys leave memory and the passphrase is asked again on resume. Suspend instead keeps the keys in RAM, which is the weaker state to leave a laptop in.
+- *Secure Boot, with no hibernation.* It would stop a root-level compromise from installing a bootloader or kernel that survives a reinstall, and it blocks unsigned kernel modules, =kexec= of unsigned kernels and userspace access to physical memory. It would *not* protect your data: =/boot= is unencrypted and the initrd that asks for the passphrase is unsigned, so boot-time tampering stays possible either way. Closing that needs TPM-measured boot, which this plan doesn't set up.
+- So the cost of this choice is that bootkit protection and kernel lockdown. The gain, besides hibernation, is that [[*4.2 Firmware updates (fwupd)][4.2]] drops the whole Microsoft-CA-expiry problem.
+- To change your mind later: enable Secure Boot in BIOS setup, do the CA work described in 4.2, and expect =systemctl hibernate= to stop working.
+
+* Phase 0 — Prerequisites
+** TODO 0.1 Push this plan; the pc reinstall can wait
+This plan works before or after =REINSTALL-pc.org=. The pc only helps, with the backup in 1.3 (route B) and with the USB stick or network boot in Phase 2. Until the pc is reinstalled, its daemon is unpatched and has substitutes enabled, so on the pc:
+- *Never ask =guix= to download anything*: no =guix pull=, =guix install=, =guix shell= or =guix build=. The pc steps here use tools that are already installed (=git=, =ssh=, =age=, =zstd=), or the store copies from [[*2.0 Tools on the pc, without downloading][2.0]].
+- Rebooting the pc is fine. It's the pc runbook's step 1.0.
+
+Push what the T460 needs after the wipe. Don't stage =config-pc.scm=: the pc runbook's steps 1.3 and 1.4 own it. On 2026-10-03 it had no pending changes, while =/etc/config.scm= on the pc may still carry the TEMP lines.
+#+begin_src sh
+cd ~/guix-config
+git status --porcelain                            # see what else is pending before you stage
+git add REINSTALL-thinkpad.org REINSTALL-pc.org thinkpad-manifest.scm Makefile
+git commit -m "Add the T460 → Debian + Guix plan and the pc reinstall runbook"
+git push
+git log origin/main -1 --oneline                  # must show this commit
+#+end_src
+- The =Makefile= change only affects a thinkpad without Guix System. The pc and the T460's current system behave as before.
+- =REINSTALL-pc.org= goes too, because 1.2 and 6.2 point to it.
+- =channels-lock.scm= pins an unpatched Guix until the pc runbook's step 3.7. The T460 never uses it: 6.5 pulls from =channels.scm=, which pins no commits.
+- The pc runbook's step 1.4 =git add=s these files again later. That's harmless.
+
+** TODO 0.2 Things to have ready
+- A USB stick of at least 1 GB. It gets erased. No stick? Network boot needs only an Ethernet cable: [[*E. Network boot instead of a USB stick][Appendix E]].
+- A backup drive with room for the T460's home directory, or plan to use the pc (route B in [[*1.3 Back up home (encrypted)][1.3]]). If the pc reinstall comes later, the same drive will also need the pc's 20 GB (its D3). Keep the T460 archive until the T460 is fully restored.
+- An Ethernet cable, if you can. Wi-Fi works too.
+- The T460 on AC power.
+
+* Phase 1 — Save everything (T460, current system)
+** TODO 1.1 Record machine facts
+#+begin_src sh
+cat /sys/class/dmi/id/bios_version /sys/class/dmi/id/bios_date
+free -h
+lsblk -d -o NAME,SIZE,MODEL,TRAN            # the internal disk: note size and model for 3.3
+ip -br link
+G=$(ps -o args= -C guix-daemon | awk 'NR==1{print $1}' | sed 's#/bin/guix-daemon$##'); echo "$G"
+grep -c 'define (rename-file\*' "$G/share/guile/site/3.0/guix/scripts/substitute.scm"
+#+end_src
+- If the =grep= prints =0= or errors out, the current daemon is unpatched. Don't download anything with it (see [[*Machine facts][Machine facts]]).
+- Copy the BIOS version, RAM and disk into [[*Machine facts][Machine facts]].
+
+** TODO 1.2 Git repos: survey, commit, push
+Run the survey script in [[*C. At-risk survey script][Appendix C]]. Commit and push everything you care about. To rescue stashes, use the recipes in =REINSTALL-pc.org= step 1.1. Every line should say =ok=, or be something you consciously leave to the backup.
+
+** TODO 1.3 Back up home (encrypted)
+Check which tools are already installed; don't install any:
+#+begin_src sh
+command -v age zstd gzip
+#+end_src
+
+*Route A:* =age= exists on the T460. Plug the backup drive into the T460. =udisksctl mount -b /dev/sdX1= prints the mount point.
+#+begin_src sh
+BK=/run/media/nabeel/BACKUP/thinkpad-2026-09      # <- adjust
+mkdir -p "$BK" && df -hT "$BK"
+cd /home
+tar -cpf - \
+  --exclude=nabeel/.cache \
+  --exclude=nabeel/.local/share/Trash \
+  --exclude=nabeel/.local/share/containers \
+  --exclude=nabeel/.npm \
+  --exclude=nabeel/.rustup \
+  --exclude=nabeel/.cargo/registry \
+  --exclude=nabeel/.cargo/git \
+  --exclude=nabeel/go/pkg \
+  --exclude=nabeel/.bun \
+  --exclude=nabeel/.local/share/uv \
+  --exclude=nabeel/.local/share/pnpm \
+  --exclude=nabeel/.emacs.d/elpaca \
+  --exclude=node_modules \
+  nabeel \
+| gzip -1 \
+| age -p > "$BK/thinkpad-home.tar.gz.age"
+#+end_src
+If =zstd= exists, use =zstd -T0 -3= instead of =gzip -1=, and name the file =.tar.zst.age=.
+
+*Route B:* =age= is missing. Stream the archive to the pc and encrypt it there. This needs the pc's SSH key to be allowed to log in to the T460. Run it *on the pc*:
+#+begin_src sh
+T460=<tailnet name or IP of the T460>             # see: tailscale status
+BK=/run/media/nabeel/BACKUP/thinkpad-2026-09
+ssh nabeel@"$T460" 'cd /home && tar -cpf - --exclude=nabeel/.cache --exclude=nabeel/.local/share/Trash \
+    --exclude=nabeel/.local/share/containers --exclude=nabeel/.npm --exclude=nabeel/.rustup \
+    --exclude=nabeel/.cargo/registry --exclude=nabeel/.cargo/git --exclude=nabeel/go/pkg --exclude=nabeel/.bun \
+    --exclude=nabeel/.local/share/uv --exclude=nabeel/.local/share/pnpm --exclude=nabeel/.emacs.d/elpaca \
+    --exclude=node_modules nabeel' \
+| zstd -T0 -3 | age -p > "$BK/thinkpad-home.tar.zst.age"
+#+end_src
+
+Optionally, save your Wi-Fi profiles so you don't retype passwords (route A; with route B, run the =sudo tar= over SSH the same way):
+#+begin_src sh
+sudo tar -cpf - /etc/NetworkManager/system-connections | age -p > "$BK/thinkpad-wifi.tar.age"
+cp ~/guix-config/REINSTALL-thinkpad.org "$BK/"
+#+end_src
+- Use the same passphrase for both archives. *Write it on paper.*
+- If the drive is FAT32, no single file can exceed 4 GiB. Pipe through =split -b 3900M - "$BK/thinkpad-home….part-"= as in the pc runbook.
+- SSH host keys and Tailscale state are *not* saved on purpose. The new OS gets a fresh identity, and the old Tailscale node is deleted in [[*7.1 Tailscale][7.1]].
+
+** TODO 1.4 Verify the backup
+Use =gzip -dc= or =zstd -dc= to match 1.3.
+#+begin_src sh
+set -o pipefail
+age -d "$BK/thinkpad-home.tar.gz.age" | gzip -dc | tar -tf - > /tmp/t460-list.txt && echo ARCHIVE-OK
+wc -l < /tmp/t460-list.txt
+for f in .ssh .gitconfig .stumpwm.d .emacs.d/Emacs.org; do
+  grep -q "^nabeel/$f" /tmp/t460-list.txt && echo "ok  $f" || echo "MISSING  $f"
+done
+rm /tmp/t460-list.txt
+#+end_src
+- [ ] =ARCHIVE-OK= printed, and no =MISSING= lines for things that existed on the T460
+- [ ] The passphrase is on paper
+
+* Phase 2 — Prepare the USB stick (on the pc)
+Network boot instead? Do 2.0, then E.0–E.5 of [[*E. Network boot instead of a USB stick][Appendix E]] in place of 2.1 and 2.2, then the checklist in 2.3.
+** DONE 2.0 Tools on the pc, without downloading
+This phase needs =gpg=, and network boot also needs =dnsmasq= and =iptables=. None of them is in a profile on the pc, but all three are already in the store. Take the newest copy of each:
+#+begin_src sh
+newest() { ls -d /gnu/store/$1 2>/dev/null | sort -t- -k3,3V | tail -1; }
+GPG=$(newest '*-gnupg-2.*/bin/gpg')
+[ -x "$GPG" ] || echo "NO gpg IN THE STORE: STOP and read the notes below"
+"$GPG" --version | head -1                        # 2.4.8 on 2026-10-03
+#+end_src
+- *Why not =guix shell= or =guix build=:* until the pc reinstall, its daemon is unpatched. The July 2026 flaw is triggered when it *downloads* a substitute, and those commands download whatever isn't in the store. Running programs that are already on disk doesn't involve the daemon at all.
+- The =[ -x … ]= check has to stay. With an empty =$GPG=, the =--verify= in 2.1 fails with "command not found", and in a step whose whole job is checking a signature, that must stop you rather than scroll past.
+- =newest= and =$GPG= live in that one shell. A new terminal needs the block again.
+- After the pc reinstall these copies are gone and the daemon is patched. Then use =GPG=$(guix build gnupg)/bin/gpg=, and the same for the two tools in [[*E.0 Find the tools (pc)][E.0]].
+
+** DONE 2.1 Download and verify the Debian netinst ISO
+#+begin_src sh
+mkdir -p ~/Downloads/debian && cd ~/Downloads/debian
+B=https://cdimage.debian.org/debian-cd/current/amd64/iso-cd
+curl -L -O "$B/SHA512SUMS" -O "$B/SHA512SUMS.sign"
+ISO=$(awk '/ debian-13[.0-9]*-amd64-netinst\.iso$/ {print $2}' SHA512SUMS); echo "$ISO"   # 13.7.0 on 2026-10-03
+curl -L -O "$B/$ISO"
+
+export GNUPGHOME=$(mktemp -d)                     # throwaway keyring; $GPG comes from 2.0
+curl -sSL https://www.debian.org/CD/key-DA87E80D6294BE9B.txt https://www.debian.org/CD/key-988021A964E6EA7D.txt \
+  | "$GPG" --import
+"$GPG" --verify SHA512SUMS.sign SHA512SUMS
+sha512sum --ignore-missing -c SHA512SUMS          # "<ISO>: OK"
+#+end_src
+- Expect =Good signature from "Debian CD signing key <debian-cd@lists.debian.org>"=, with the primary key fingerprint =DF9B 9C49 EAA9 2984 3258  9D76 DA87 E80D 6294 BE9B= (or the older Debian CD key, =1046 0DAD 7616 5AD8 1FBC  0CE9 9880 21A9 64E6 EA7D=). Both are listed at https://www.debian.org/CD/verify.
+- The "not certified with a trusted signature" warning is normal with a fresh keyring.
+- A =BAD signature=, or any other fingerprint: *STOP*.
+
+** DONE 2.2 Write the USB stick
+#+begin_src sh
+lsblk -o NAME,SIZE,MODEL,TRAN,MOUNTPOINTS         # find the stick: TRAN=usb, e.g. sdb
+#+end_src
+*DESTRUCTIVE*, and only for the stick. Never =nvme0n1=, never the backup drive:
+#+begin_src sh
+sudo umount /dev/sdX?* 2>/dev/null
+sudo dd if="$ISO" of=/dev/sdX bs=4M status=progress conv=fsync
+sudo cmp -n "$(stat -c %s "$ISO")" "$ISO" /dev/sdX   # prints nothing if the stick matches the ISO
+lsblk -o NAME,FSTYPE,SIZE,LABEL /dev/sdX             # sdX *itself* must say iso9660, with sdX1 and sdX2 inside
+#+end_src
+- *The target is the whole device, =/dev/sdb=, never a partition such as =/dev/sdb1=.* The ISO carries its own partition table, including the EFI partition that the firmware boots from. Written one partition deep, the stick keeps its old table, the firmware finds no boot loader, and the F12 entry for it does nothing at all.
+- The =lsblk= line is what catches that mistake: a stick written to the partition shows =iso9660= on =sdX1=, at the stick's full size, and nothing on =sdX=.
+- =cmp= is worth the minute: a stick that wrote badly would fail mid-install, after the wipe. Point it at the same device you wrote to.
+
+** DONE 2.3 Pre-flight checklist [0/8]
+- [ ] Repos pushed; the survey (1.2) shows nothing unsaved
+- [ ] The backup is verified (1.4), and its passphrase is on paper
+- [ ] This file is on the backup drive and readable on GitHub from your phone
+- [ ] The USB stick is written and verified (2.1), or the netboot image is verified (E.1)
+- [ ] A *LUKS passphrase* is chosen. You'll type it at every boot. Store a paper copy somewhere safe.
+- [ ] Ethernet is plugged in, or the Wi-Fi password is at hand
+- [ ] The backup drive is *unplugged* from the T460
+- [ ] You can reach GitHub's SSH key settings from the pc or your phone (for 6.1)
+
+* Phase 3 — Install Debian (T460)
+** 3.1 BIOS settings
+Power on and press =Enter=, then =F1=, for BIOS setup.
+- /Startup → UEFI/Legacy Boot/: *UEFI Only*. /CSM Support/: *No*.
+- /Security → Secure Boot → Secure Boot/: *Disabled*. [[*D7 — Secure Boot or hibernation][D7]] chose hibernation, which needs it off. Guix System never used it, so it is probably off already; check rather than assume, and note what it was in case you revisit D7.
+- Optional: /Security → Password → Supervisor Password/. It stops someone from changing BIOS settings or booting another USB stick, and nothing more: the data on the disk is LUKS's job. *If you forget it, Lenovo's only fix is replacing the system board.* Set it only if you'll store it as carefully as the LUKS passphrase, and keep it to hand for 4.2, since the firmware may ask for it while applying an update.
+- =F10= saves. At the next power-on, =F12= opens the boot menu: pick the USB stick. For network boot, see [[*E.6 Boot the T460 from the network][E.6]].
+
+** 3.2 Installer basics
+Pick "Install" (text) or "Graphical install". With Secure Boot off (D7) the stick boots unconditionally; if it doesn't, see [[*B. Troubleshooting][Troubleshooting]].
+- Language: English. Location: /other → Asia → India/, which gives the Asia/Kolkata time zone. Locale: =en_IN.UTF-8= (matches your Guix config).
+- Keyboard: American English. =altgr-intl= is set per X session in [[*6.6 StumpWM session][6.6]].
+- Network: Ethernet if plugged in; otherwise Wi-Fi.
+- Hostname: *=thinkpad=*. Domain name: leave it empty.
+- Root password: *leave it empty*. That disables root logins and gives =nabeel= =sudo=.
+- User: full name "Nabeel Javed", username =nabeel=, and a strong password. You'll type it for =sudo= and =i3lock=.
+
+** 3.3 Partitioning — DESTRUCTIVE
+1. /Guided - use entire disk and set up encrypted LVM/
+2. Select the *internal* disk. Match its size and model against [[*1.1 Record machine facts][1.1]], not the USB stick.
+3. /All files in one partition/
+4. "Write the changes to disks and configure LVM?" → Yes. *Point of no return.*
+5. "Erasing data…": *let it finish* (roughly 15–60 min). It overwrites the old, unencrypted Guix System data with random data.
+6. Enter the LUKS passphrase from 2.3.
+7. /Amount of volume group to use for guided partitioning/: *leave your RAM plus 2 GB unused*. On a 240 GB disk with 8 GB of RAM, enter =230 GB=. The installer sizes swap smaller than RAM, and [[*4.7 Hibernation (D7)][4.7]] grows it into the space you leave here.
+8. /Finish partitioning and write changes to disk/.
+The swap volume lives inside the encrypted LVM, so hibernation images are encrypted too, and resuming asks for the LUKS passphrase.
+
+** 3.4 Software selection
+- Mirror: =deb.debian.org=. Popularity contest: No.
+- Software selection: *untick* "Debian desktop environment" and "GNOME". Tick *only* "standard system utilities", plus "SSH server" if D4 = yes.
+- Finish, remove the stick, reboot, and type the LUKS passphrase.
+
+* Phase 4 — Base system (T460, Debian)
+Log in as =nabeel= on tty1. There's no GUI yet.
+
+*Debian keeps =/usr/sbin= out of a normal user's =PATH=*, unlike Guix System. So =swapon=, =blkid=, =lvs=, =vgs=, =fdisk=, =efibootmgr= and friends print "command not found" until you prefix them with =sudo=, which has them in its own path. =cat /proc/swaps= is the root-free way to look at swap.
+** DONE 4.1 Update, then check the basics
+#+begin_src sh
+sudo apt update && sudo apt full-upgrade
+cat /etc/debian_version                                # 13.7 or newer
+grep -rh 'non-free-firmware' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null   # present
+sudo apt install intel-microcode firmware-iwlwifi      # usually already installed by the installer
+lsblk -f                                               # crypto_LUKS → LVM root + swap
+sudo cryptsetup luksDump "$(lsblk -rpno NAME,FSTYPE | awk '$2=="crypto_LUKS"{print $1; exit}')" | head -3
+#+end_src
+
+** DONE 4.2 Firmware updates (fwupd)
+#+begin_src sh
+sudo apt install fwupd mokutil
+mokutil --sb-state                               # "SecureBoot disabled": D7's choice
+sudo fwupdmgr refresh
+sudo fwupdmgr get-updates                        # look for System Firmware
+sudo fwupdmgr update
+sudo reboot
+#+end_src
+- LUKS with a passphrase doesn't care about firmware key changes. Only keys sealed to a TPM chip would.
+- *If you ever switch to Secure Boot (D7)*, there's one more job: Microsoft's "UEFI CA 2011", which signs shim, expired in June 2026. Debian 13.6+ ships a shim signed with both the old and the new CA, so it still boots on the T460, but the *next* shim update can only carry the 2023 CA, and Lenovo won't ship that CA for a 2016 laptop. =fwupd= can install it, because the update is signed by Microsoft's KEK, which the firmware already trusts; fwupd's docs use a Lenovo P50 of the same generation as their example. Look for a UEFI CA / db / dbx update in =get-updates=, then check =mokutil --db | grep 'Subject:.*Microsoft'= lists =CN=Microsoft UEFI CA 2023=. A "KEK CA" update may not be offered for this model; Debian's wiki says not to worry about that yet.
+- If fwupd offers a *System Firmware* (BIOS) update, apply it on AC power.
+- If it doesn't, compare the BIOS version from 1.1 with Lenovo's T460 support page. The "BIOS Update (Bootable CD)" ISO can be turned into a USB image with =geteltorito= (Debian package =genisoimage=).
+
+** TODO 4.3 Automatic security updates
+#+begin_src sh
+sudo apt install unattended-upgrades apt-listchanges
+sudo dpkg-reconfigure -plow unattended-upgrades       # answer Yes
+cat /etc/apt/apt.conf.d/20auto-upgrades               # both values "1"
+sudo unattended-upgrade --dry-run --debug 2>&1 | grep -i 'allowed origins'   # security pocket only, for now
+#+end_src
+[[*7.1 Tailscale][7.1]] adds Tailscale's repo to this.
+
+*Why it's automatic here:* Debian owns everything that runs as root or checks a password, so this is the half of [[*A. Keeping it patched][Appendix A]] you shouldn't have to remember. The Guix half stays manual on purpose. An unpatched daemon nobody got around to upgrading is the reason this file exists.
+
+*It never reboots on its own*, so a new kernel or a patched library isn't in use until you restart:
+#+begin_src sh
+sudo apt install needrestart                          # hooks into apt and reports what still runs old code
+cat /var/run/reboot-required 2>/dev/null              # present = restart to finish applying updates
+sudo needrestart -r l                                 # list services that want restarting
+#+end_src
+- Check that marker file now and then. It's also worth a line in your =.bashrc= if you'd like the reminder.
+  #+caption: For ai
+  #+begin_quote
+  Yes add it to my bashrc, that if hostname is thinkpad then check marker file and tell me.
+  #+end_quote
+- If you'd rather it handled itself, add =Unattended-Upgrade::Automatic-Reboot "true";= and =Unattended-Upgrade::Automatic-Reboot-Time "04:00";= to =/etc/apt/apt.conf.d/50unattended-upgrades=. On a laptop that's rarely awake at 04:00, the marker plus a habit works better.
+- Logs live in =/var/log/unattended-upgrades/=, and =apt-listchanges= shows what changed.
+
+** DONE 4.4 Firewall
+#+begin_src sh
+sudo apt install ufw
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw enable
+sudo ufw status verbose
+#+end_src
+Outgoing connections, including Tailscale's, still work. The tailnet rule for D4 comes in [[*7.1 Tailscale][7.1]].
+
+** TODO 4.5 Host packages
+#+begin_src sh
+sudo apt install \
+  xserver-xorg-core xserver-xorg-input-libinput xinit xauth x11-xserver-utils \
+  i3lock xss-lock dbus-user-session dbus-bin \
+  network-manager pipewire-audio bluez udisks2 \
+  nscd uidmap gnupg wget xz-utils \
+  git curl make age zstd \
+  pulseaudio-utils brightnessctl blueman
+#+end_src
+| Package(s)                   | Why                                                                                            |
+|------------------------------+------------------------------------------------------------------------------------------------|
+| =xserver-xorg-*=, =xinit=, =xauth= | X from Debian; StumpWM from Guix is just an X client                                           |
+| =i3lock=, =xss-lock=             | the screen locker authenticates through *Debian's* PAM; =xss-lock= locks on suspend                |
+| =dbus-user-session=, =dbus-bin=  | a per-user D-Bus for PipeWire, notifications and portals; =dbus-bin= has the tool =.xinitrc= calls |
+| =nscd=                         | the Guix manual recommends it on other distros, so Guix programs can look up users and hosts   |
+| =uidmap=                       | provides =newgidmap=: the installer refuses to set up the unprivileged daemon without it         |
+| =gnupg=, =wget=, =xz-utils=        | required by =guix-install.sh=                                                                    |
+| =git=, =curl=, =make=, =age=, =zstd=   | needed before Guix exists: cloning, the =Makefile=, restoring backups                            |
+| =pulseaudio-utils=              | gives =pactl=, which your StumpWM volume and mic keys call; it talks to PipeWire through =pipewire-pulse= |
+| =brightnessctl=                 | for its udev rule, which lets the =video= group write =/sys/class/backlight=; your backlight keys need that |
+| =blueman=                       | the applet needs =blueman-mechanism=, a root D-Bus service that only a system package can register |
+
+Then check the keys your StumpWM config depends on:
+#+begin_src sh
+id                                    # groups must include video (brightnessctl) and audio
+# sudo usermod -aG video nabeel       # only if video is missing; log out and back in afterwards
+systemctl --user status pipewire pipewire-pulse wireplumber | grep -E 'Loaded|Active'
+pactl info | head -3                  # "Server Name: PulseAudio (on PipeWire …)"
+#+end_src
+- =pactl=, =pamixer= and =pavucontrol= all speak the PulseAudio protocol, which =pipewire-pulse= provides, so your existing keybindings and =sound-settings= command work unchanged. =pamixer= and =pavucontrol= stay in your Guix manifest; only =pactl= comes from apt.
+- =wpctl status= (from =wireplumber=) is the native alternative if you ever want it, and the quickest way to see whether WirePlumber found a device at all.
+
+*PATH shadowing — the trap of sharing one profile across both machines.* Your Guix profile comes before =/usr/bin=, so whenever both provide a command, the Guix copy wins:
+#+begin_src sh
+type -a blueman-applet udiskie i3lock brightnessctl     # Guix paths listed first
+#+end_src
+- =blueman= is in =current-profile-manifest=, so the Guix =blueman-applet= would run, and it can't talk to =blueman-mechanism=. On this machine it has to be Debian's, by absolute path: [[*6.6 StumpWM session][6.6]] does that.
+- =udiskie= is in the manifest too, but it's only a client of =udisks2= (apt, above), so the Guix copy is fine. If mounting misbehaves, =sudo apt install udiskie= and point at =/usr/bin/udiskie= the same way.
+- =i3lock= and =xss-lock= are *not* in your manifests, so nothing shadows them. =~/.xinitrc= in 6.6 calls =/usr/bin/i3lock= anyway, which is the pattern to copy.
+- =brightnessctl= is in the manifest, and the Guix copy works once Debian's udev rule is installed, so either binary is fine here.
+
+** DONE 4.6 Hand the network to NetworkManager
+The installer wrote your install-time connection into =/etc/network/interfaces=, and NetworkManager leaves anything listed there alone ("unmanaged"). If you installed over Wi-Fi, *the password is stored there in plain text*.
+#+begin_src sh
+sudoedit /etc/network/interfaces      # keep only "source …" and the "lo" lines
+sudo reboot
+nmcli device wifi connect "<SSID>" --ask
+#+end_src
+Or restore your saved profiles from 1.3 instead:
+#+begin_src sh
+udisksctl mount -b /dev/sdX1          # prints the mount point, e.g. /media/nabeel/BACKUP
+BK=/media/nabeel/BACKUP/thinkpad-2026-09
+age -d "$BK/thinkpad-wifi.tar.age" | sudo tar -xpf - -C / etc/NetworkManager/system-connections
+sudo chmod 600 /etc/NetworkManager/system-connections/*
+sudo systemctl restart NetworkManager
+#+end_src
+
+** TODO 4.7 Hibernation (D7)
+This is what [[*D7 — Secure Boot or hibernation][D7]] traded Secure Boot for, so it's worth getting working. Hibernation needs swap at least as big as your RAM, and the installer's swap is smaller. Grow it into the room 3.3 left:
+#+begin_src sh
+free -h; cat /proc/swaps                         # swap size against RAM (1.1)
+sudo vgs                                         # VFree: what 3.3 left spare
+sudo lvs -o lv_path,lv_size,lv_name              # the swap volume's own path, e.g. /dev/thinkpad-vg/swap_1
+SWAP=/dev/<vg>/<swap lv>                         # <- fill in from that line; not the /dev/mapper name
+SIZE=$(awk '/MemTotal/ {printf "%dG", int($2/1048576)+2}' /proc/meminfo); echo "$SIZE"   # RAM rounded down, +2
+sudo swapoff "$SWAP"
+sudo lvextend -L "$SIZE" "$SWAP"                 # absolute size, and it must fit VFree
+sudo mkswap "$SWAP"
+sudo swapon "$SWAP"; sudo swapon --show
+#+end_src
+=mkswap= gives the volume's *contents* a new UUID. The volume's path doesn't change. So look at how the two files that name the swap refer to it:
+#+begin_src sh
+sudo blkid -s UUID -o value "$SWAP"              # the new UUID
+cat /etc/initramfs-tools/conf.d/resume
+grep -i swap /etc/fstab
+#+end_src
+- *By path* — =RESUME=/dev/mapper/thinkpad--vg-swap_1= and an =/dev/mapper/…= line in =fstab=. That's what Debian's guided LVM writes, and *there is nothing to edit*: the path survived =mkswap=.
+- *By UUID* — either file says =UUID===. Then it is now stale, and the machine would boot a fresh session instead of resuming. Put the UUID printed above into it:
+  #+begin_src sh
+  sudoedit /etc/initramfs-tools/conf.d/resume    # RESUME=UUID=<the new UUID>
+  sudoedit /etc/fstab                            # the swap line's UUID=
+  #+end_src
+- Either way, rebuild the initramfs, since =/etc/initramfs-tools/conf.d/= is copied into it:
+  #+begin_src sh
+  sudo update-initramfs -u -k all
+  #+end_src
+Then test it, with nothing unsaved open:
+#+begin_src sh
+sudo systemctl hibernate
+#+end_src
+- The machine powers off. At the next power-on you type the LUKS passphrase, the initramfs unlocks the disk and resumes your session. *That prompt is the whole point:* the keys had left RAM.
+- "Not enough swap space for hibernation" means the =lvextend= wasn't big enough.
+- If 3.3 used the whole volume group after all, =lvextend= has no room. Either redo the install, or use a swap *file* on the encrypted root with =resume_offset=, as in =REINSTALL-pc.org= step 2.7.
+- TODO: Whatever =VFree= is left over once swap is sized can go to root, online and while mounted. Keep a few GB spare only if you want room for LVM snapshots:
+  #+begin_src sh
+  sudo lvextend -l +100%FREE /dev/<vg>/root && sudo resize2fs /dev/<vg>/root
+  df -h /
+  #+end_src
+- TODO: Optional, and the better default for a laptop: suspend first, hibernate later.
+#+begin_src sh
+sudo mkdir -p /etc/systemd/sleep.conf.d /etc/systemd/logind.conf.d
+printf '[Sleep]\nHibernateDelaySec=30min\n' | sudo tee /etc/systemd/sleep.conf.d/10-delay.conf
+printf '[Login]\nHandleLidSwitch=suspend-then-hibernate\n' | sudo tee /etc/systemd/logind.conf.d/10-lid.conf
+sudo systemctl restart systemd-logind
+#+end_src
+  Closing the lid suspends, and 30 minutes later the machine hibernates, so the keys don't sit in RAM all night. =xss-lock= (4.5, wired up in [[*6.6 StumpWM session][6.6]]) locks the screen for both.
+
+* Phase 5 — Install Guix (T460)
+** DONE 5.1 Download the patched tarball and the installer
+#+begin_src sh
+cd /tmp
+curl -L -o guix-binary.x86_64-linux.tar.xz https://ci.guix.gnu.org/download/4029
+stat -c %s guix-binary.x86_64-linux.tar.xz          # 147244972 for build 25622019
+curl -fsSL -o guix-install.sh https://guix.gnu.org/guix-install.sh
+chmod +x guix-install.sh
+#+end_src
+- The file name must contain =x86_64-linux=, because the installer checks it.
+- *Always-latest link*, which redirects to the newest matching build product: https://ci.guix.gnu.org/search/latest/archive?query=spec:tarball+status:success+system:x86_64-linux+guix-binary.tar.xz
+  On 2026-10-03 it sent back =302 → /download/4029=, the build above. Keep =system:x86_64-linux= in the query: dropping it redirected to =/download/4028=, a tarball for another architecture.
+- *Where =/download/4029= comes from:* =4029= is not the build number. Cuirass nests four things — specification (=tarball=) → evaluation (=2208682=, one channel commit) → build (=25622019=, one job) → *build product* (=4029=, the file). Only the product id appears in a download URL. =curl -s https://ci.guix.gnu.org/build/25622019= returns that build as JSON, with its =buildproducts= and their ids.
+- If =/download/4029= is gone (CI deletes old builds), try =/download/4002= (also patched), or find the newest successful build:
+  #+begin_src sh
+  curl -s 'https://ci.guix.gnu.org/api/latestbuilds?nr=1&jobset=tarball&job=binary-tarball.x86_64-linux&status=success' \
+    | grep -oE '"(id|evaluation|timestamp|file-size)":[0-9]+'
+  # the 2nd "id" is the download id → https://ci.guix.gnu.org/download/<id>
+  # date -d @<timestamp> must be after 2026-07-05; step 5.3 confirms the fix either way
+  #+end_src
+  This query last worked on 2026-10-03, when its newest hit was the build above, =25622019= with download id =4029=.
+
+** DONE 5.2 Run the installer
+#+begin_src sh
+sudo env GUIX_BINARY_FILE_NAME=/tmp/guix-binary.x86_64-linux.tar.xz ./guix-install.sh
+#+end_src
+Every prompt defaults to *yes* when you just press Enter. Read each one:
+| Prompt                                                                                            | Answer | Why                                                                              |
+|---------------------------------------------------------------------------------------------------+--------+----------------------------------------------------------------------------------|
+| Install AppArmor profile that might be required to run guix-daemon?                               | y      | upstream's profile (checked on master) confines the daemon, not just unblocks it |
+| Would you like the Guix daemon to automatically discover substitute servers on the local network? | *n*      | not on a laptop that joins untrusted networks                                    |
+| Permit downloading pre-built package binaries from the project's build farms?                     | y      | the daemon is patched, so substitutes are safe                                   |
+| Customize users Bash shell prompt for Guix?                                                       | n      | your =.bashrc= already handles =$GUIX_ENVIRONMENT=                                   |
+- It must print "installing guix-daemon to run as an unprivileged user". If it doesn't, stop and see [[*B. Troubleshooting][Troubleshooting]].
+- Afterwards, log out and back in so =/etc/profile.d/zzz-guix.sh= is loaded.
+
+** DONE 5.3 Verify the daemon — STOP if not patched
+#+begin_src sh
+ps -o user=,args= -C guix-daemon | cut -c1-160      # user column: guix-daemon
+G=/var/guix/profiles/per-user/root/current-guix
+readlink -f "$G"                                     # …-guix-1.5.0-7.5ceffb6 (or newer)
+grep -c 'define (rename-file\*' "$G/share/guile/site/3.0/guix/scripts/substitute.scm"   # must print 1
+ls -ld /gnu/store; findmnt -no OPTIONS /gnu/store    # owner guix-daemon; mounted ro
+sudo aa-status | grep -i guix                        # the guix-daemon profile is loaded
+guix build hello                                     # downloads a substitute, builds nothing
+guix shell --container hello -- hello                # user namespaces work
+#+end_src
+- If =grep= prints =0=, or =readlink= shows an older commit: *STOP*. The wrong tarball was installed. Uninstall with =sudo ./guix-install.sh --uninstall= and repeat 5.1.
+
+*The advisory's own test, which is the authoritative one.* The grep above only inspects source; the advisory ends with a Scheme script that *attempts all four vulnerabilities* against your running daemon. There's no file to download: the script exists only as the last code block in the post.
+
+- *With a browser* (so: on the pc, not on the T460 at this point in the plan), open the post, copy that last code block, save it as =guix-vuln-check.scm=, and copy it over with =scp= over the tailnet or on the backup drive. Then skip to the =guix repl= line below.
+- *On the T460's console*, where there is no browser yet, fetch the page and cut the block out of the HTML:
+#+begin_src sh
+curl -fsSL https://guix.gnu.org/en/blog/2026/guix-substitute-pull-vulnerabilities/ \
+| awk 'BEGIN{RS="<pre[^>]*>"} NR>1{n++; b[n]=$0} END{split(b[n],a,"</pre>"); print a[1]}' \
+| sed -e 's/<[^>]*>//g' -e 's/&quot;/"/g; s/&amp;/\&/g; s/&lt;/</g; s/&gt;/>/g; s/&#39;/'"'"'/g' \
+> /tmp/guix-vuln-check.scm
+wc -l /tmp/guix-vuln-check.scm                       # 422 lines on 2026-10-03
+guix repl -- /tmp/guix-vuln-check.scm; echo "exit=$?"
+#+end_src
+Expect exactly this, and =exit=0=:
+#+begin_example
+restore-file: not vulnerable
+fetch-narinfos: not vulnerable
+file-uris: not vulnerable
+cache-key: not vulnerable
+#+end_example
+- Any =vulnerable= line: *STOP*. The wrong tarball is installed.
+- A line starting with =error:= is *inconclusive*, not a pass. The advisory lists the reasons: no authorized substitutes, no reachable substitute for =cfunge=, =hello= or =sed=, =cfunge= being held by a GC root, or no network access to Codeberg for the =cache-key= test.
+- =cache-key: error: … git "fetch" … exit-status: 128= means the test couldn't clone part of the =guix-science= channel from Codeberg. At this point in the plan the usual cause is *not* the network but certificates: the =git= it uses comes from the store, and =SSL_CERT_FILE= isn't set until the =.bashrc= from 6.4 is in place. The giveaway in the output is =SSL certificate verification failed: certificate signer not trusted. (CAfile: none CRLfile: none)=. Set them for the run:
+  #+begin_src sh
+  ls -l /etc/ssl/certs/ca-certificates.crt          # Debian's bundle; apt install ca-certificates if missing
+  export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+  export SSL_CERT_DIR=/etc/ssl/certs
+  export GIT_SSL_CAINFO=$SSL_CERT_FILE
+  git ls-remote https://codeberg.org/guix-science/guix-science.git | head -1   # must print a commit
+  #+end_src
+- =restore-file: error: …!!!substitution of invalid nar completed???!!!= needs care. The script's own comment says that completing means "most definitely vulnerable", but a patched daemon can reach the same line *benignly*, by substituting the real =cfunge= instead of the crafted one. Decide it with evidence rather than the message:
+  #+begin_src sh
+  ls -l /tmp/guix-restore-file-vulnerable               # must NOT exist
+  ls -d /gnu/store/*-cfunge-* 2>/dev/null               # if present, a real substitute landed: benign
+  readlink -f /var/guix/profiles/per-user/root/current-guix
+  grep -c 'define (rename-file\*' /var/guix/profiles/per-user/root/current-guix/share/guile/site/3.0/guix/scripts/substitute.scm
+  #+end_src
+  The file exists, holding the word =VULNERABLE!=, *only* if the bug fired. Missing file plus a =1= from the =grep= means the daemon is patched and the line was the benign path. If the file does exist: *STOP*.
+  The script's own log says how far it got. =Returning narinfo pointing to test nar= means the daemon used the fake server; =Returning test nar= means the crafted archive was actually served. Without that second line, the exploit never had its chance, so the error can't be evidence of a vulnerable daemon.
+- *It provokes the bugs rather than reading code.* On a vulnerable daemon it writes =/tmp/guix-restore-file-vulnerable= and a file under a temporary directory; on a patched one nothing happens. It also tries to delete =cfunge= from the store to force a substitution, and binds a port on localhost.
+- Tests 1–3 exercise the *running daemon*; test 4 exercises the =guix pull= code of whoever runs the script. So run it again as yourself after 6.5, when your own Guix has changed.
+- It needs the network and at least one authorized substitute server, so it belongs after the =guix build hello= line above rather than before it.
+
+** DONE 5.4 Update root's Guix, which is the daemon, right away
+#+begin_src sh
+sudo -i guix pull                    # root has no channels.scm: default channel only
+sudo systemctl restart guix-daemon
+readlink -f /var/guix/profiles/per-user/root/current-guix   # a newer guix than 5.3
+ps -o user= -C guix-daemon                                  # still guix-daemon
+#+end_src
+This is also how you update the daemon from now on (see [[*A. Keeping it patched][Appendix A]]). =apt= never touches it.
+
+*Why =sudo -i= and not plain =sudo=, or nothing at all:* the daemon's systemd unit starts =/var/guix/profiles/per-user/root/current-guix/bin/guix-daemon=, which is *root's* Guix, and =guix pull= only ever updates the Guix of the user running it. =sudo -i= gives a root login shell, so the pull lands in root's profile, which is the daemon. Plain =sudo guix pull= is the one to avoid: the manual notes that "=sudo guix= runs your user's =guix= command and not root's, because =sudo= leaves =PATH= unchanged", so you'd be running your Guix with root's privileges and updating the wrong profile. The manual's own upgrade instructions for a foreign distro installed with =guix-install.sh= are exactly these two lines (see [[*D. Facts and sources (checked 2026-09-21)][Facts]]).
+- This is the one place where root runs something from the store, which [[*The one rule behind the design][The one rule behind the design]] calls out. There's no way around it: updating the daemon means updating root's Guix.
+- On *Guix System* it's different — there you never pull as root, you reconfigure the system, which is why the pc's runbook doesn't have this step.
+
+* Phase 6 — Your environment (T460)
+** DONE 6.1 SSH key and secrets
+For D5 = new key:
+#+begin_src sh
+ssh-keygen -t ed25519 -C "nabeel@thinkpad"
+cat ~/.ssh/id_ed25519.pub            # add at https://github.com/settings/keys (from the pc or phone)
+ssh -T git@github.com                # "Hi nbljaved! …"
+#+end_src
+- On the same GitHub page, *delete the T460's old key*.
+- Restore only the small secrets you need from the backup. Use =zstd -dc= for a =.tar.zst.age= archive:
+#+begin_src sh
+BK=/media/nabeel/BACKUP/thinkpad-2026-09
+age -d "$BK/thinkpad-home.tar.gz.age" | gzip -dc | tar -xpf - -C /home nabeel/.gitconfig nabeel/.config/git
+# D5: add nabeel/.age to that list only if you need it here
+#+end_src
+
+** TODO 6.2 Clone your repos
+#+begin_src sh
+git clone                      git@github.com:nbljaved/guix-config.git     ~/guix-config
+git clone                      git@github.com:nbljaved/shell-config.git    ~/shell-config
+git clone                      git@github.com:nbljaved/emacs-config.git    ~/.emacs.d
+git -C ~/.emacs.d remote add downstream git@github.com:nbl-natsoft/emacs-config.git
+git clone --recurse-submodules git@github.com:nbljaved/stumpwm-config.git  ~/.stumpwm.d
+git clone                      git@github.com:nbljaved/org-roam-files.git  ~/org/roam
+git -C ~/guix-config log -1 --oneline -- REINSTALL-thinkpad.org   # this file is in the repo
+#+end_src
+Clone any other repos you want on the laptop from the table in =REINSTALL-pc.org= step 3.5.
+
+** TODO 6.3 nonguix substitutes
+Your manifest includes nonguix packages, such as =google-chrome-stable=. =signing-key.pub= is *nonguix's* key.
+#+begin_src sh
+sudo guix archive --authorize < ~/guix-config/signing-key.pub
+sudo chown -R guix-daemon:guix-daemon /etc/guix      # the unprivileged daemon must read the ACL
+sudo systemctl edit guix-daemon
+#+end_src
+In the editor, add the lines below. They override the unit's =ExecStart= in a drop-in file that survives upgrades:
+#+begin_src conf
+[Service]
+ExecStart=
+ExecStart=/var/guix/profiles/per-user/root/current-guix/bin/guix-daemon --discover=no --substitute-urls='https://bordeaux.guix.gnu.org https://ci.guix.gnu.org https://substitutes.nonguix.org'
+#+end_src
+#+begin_src sh
+sudo systemctl restart guix-daemon
+ps -o user=,args= -C guix-daemon | cut -c1-200       # guix-daemon … substitutes.nonguix.org
+#+end_src
+
+** TODO 6.4 Recreate symlinks
+This is the subset of the pc's step 3.6 that applies here:
+#+begin_src sh
+mv ~/.profile ~/.profile.debian      # Debian's default; your .bash_profile would source it plus .bashrc twice
+ln -sf  ~/shell-config/.bashrc                ~/.bashrc
+ln -sf  ~/shell-config/.bash_profile          ~/.bash_profile
+ln -sf  ~/shell-config/.blerc                 ~/.blerc
+mkdir -p ~/.config/guix
+ln -sfn ~/shell-config/kitty                  ~/.config/kitty
+ln -sf  ~/shell-config/starship/starship.toml ~/.config/starship.toml
+ln -sf  ~/guix-config/channels.scm            ~/.config/guix/channels.scm
+#+end_src
+Your =.bashrc= already has a branch for distros other than Guix System. It sets =GUIX_LOCPATH=, =SSL_CERT_*= and sources the profile. Log out and back in afterwards.
+
+** TODO 6.5 Guix: pull and install the profile
+#+begin_src sh
+guix pull                            # full channels.scm: guix, nonguix, rde, guix-science(+nonfree)
+hash -r; guix describe
+cd ~/guix-config
+make apply-guix-profile              # = guix package -m current-profile-manifest -m thinkpad-manifest.scm -L modules
+#+end_src
+- Don't regenerate or use =channels-lock.scm= here. The pc owns the lock, and until the pc runbook's step 3.7 it pins an unpatched Guix.
+- =nbl-emacs= (=modules/nbl=) has no substitutes, so it builds on the T460, with native compilation. On a dual-core, expect this to be the longest step. Let it run.
+- If a local build fails with =chown= / =Errno 22=, see [[*B. Troubleshooting][Troubleshooting]].
+- Then open a new login shell and run =fc-cache -f= (Guix's fontconfig, from =thinkpad-manifest.scm=).
+
+** TODO 6.6 StumpWM session
+Create =~/.xinitrc=:
+#+begin_src sh
+cat > ~/.xinitrc <<'EOF'
+#!/bin/sh
+# thinkpad (Debian): X server from Debian, StumpWM from Guix.
+# Let systemd user services (PipeWire, portals) see this display.
+dbus-update-activation-environment --systemd DISPLAY XAUTHORITY
+[ -f ~/.Xresources ] && xrdb -merge ~/.Xresources
+setxkbmap us -variant altgr-intl
+# Lock on suspend and on `loginctl lock-session`.  Debian's i3lock on
+# purpose: it authenticates through Debian's PAM.
+xss-lock --transfer-sleep-lock -- /usr/bin/i3lock --nofork &
+exec stumpwm
+EOF
+#+end_src
+Append this to =~/shell-config/.bash_profile=, then commit and push it in =shell-config=. The =hostname= check keeps it inert on the pc:
+#+begin_src sh
+# thinkpad (Debian): start X after logging in on tty1.  `exec` means
+# leaving X also ends the login session, so no shell is left behind.
+if [ -z "$DISPLAY" ] && [ "$(tty)" = /dev/tty1 ] && [ "$(hostname)" = thinkpad ]; then
+    exec startx
+fi
+#+end_src
+Log out and log in on tty1: StumpWM should start. Test the locker with =loginctl lock-session= and by closing the lid.
+
+*One edit in =~/.stumpwm.d=, for the PATH shadowing in 4.5.* =bluetooth-start= in =defcommands.lisp= runs =blueman-applet= by bare name, so it would start the Guix copy, which can't reach =blueman-mechanism=. =init.lisp= already defines =pc?= from the hostname, so pick the binary from that:
+#+begin_src lisp
+(defparameter *blueman-applet* (if pc? "blueman-applet" "/usr/bin/blueman-applet"))
+#+end_src
+Use it in both places =bluetooth-start= names the program: the =executable?= test and the =run-shell-command=. Then commit and push it in =stumpwm-config=; the pc keeps running its Guix copy, so nothing changes there.
+- =udiskie-start= can stay as it is. The Guix =udiskie= only drives =udisks2=, which came from apt in 4.5.
+- Check what the session actually started: =pgrep -a blueman-applet= should show =/usr/bin/blueman-applet=, and pairing a device from the applet should work rather than failing silently.
+
+** TODO 6.7 Emacs and StumpWM
+Same as the pc's steps 3.8 and 3.9:
+#+begin_src sh
+emacs --batch --eval "(require 'org)" --eval '(org-babel-tangle-file "~/.emacs.d/Emacs.org")'
+emacs        # first start: elpaca clones and builds its packages; restart Emacs afterwards
+#+end_src
+Restore =~/quicklisp= and =~/.sbclrc= from the backup (6.8), then:
+#+begin_src sh
+ln -sfn ~/.stumpwm.d/clx-truetype ~/quicklisp/local-projects/clx-truetype
+#+end_src
+
+** TODO 6.8 Restore the remaining data
+Extract to a staging directory and copy back only what you want. Use =zstd -dc= for a =.zst= archive.
+#+begin_src sh
+mkdir -p ~/restore && cd ~/restore
+age -d "$BK/thinkpad-home.tar.gz.age" | gzip -dc | tar -xpf -
+O=~/restore/nabeel
+diff <(ls -A "$O") <(ls -A ~)        # what exists only in the backup
+rsync -a "$O/quicklisp" "$O/.sbclrc" "$O/.slynkrc" "$O/.Xresources" ~/   # add whatever else you want
+#+end_src
+When you're done: =rm -rf ~/restore= (it contains keys). Keep the backup drive for a few weeks.
+
+* Phase 7 — Services and extras (T460)
+** TODO 7.1 Tailscale
+D2 = Tailscale's apt repo:
+#+begin_src sh
+curl -fsSL https://pkgs.tailscale.com/stable/debian/trixie.noarmor.gpg \
+  | sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+curl -fsSL https://pkgs.tailscale.com/stable/debian/trixie.tailscale-keyring.list \
+  | sudo tee /etc/apt/sources.list.d/tailscale.list
+sudo apt update && sudo apt install tailscale
+sudo tailscale up                    # open the printed URL and log in
+tailscale status
+
+# let unattended-upgrades patch it too (the repo's Release file says Origin: Tailscale)
+echo 'Unattended-Upgrade::Origins-Pattern { "origin=Tailscale"; };' \
+  | sudo tee /etc/apt/apt.conf.d/51unattended-upgrades-tailscale
+sudo unattended-upgrade --dry-run --debug 2>&1 | grep -i 'allowed origins'   # includes origin=Tailscale
+#+end_src
+- In the Tailscale admin console, *delete the old thinkpad node*, and rename the new one if needed.
+- D4 = yes: =sudo ufw allow in on tailscale0=. SSH then only answers over the tailnet.
+
+** TODO 7.2 xremap (optional)
+On the pc you ran xremap with =sudo=. Here, run it as your user instead, because the rule says root runs nothing from the store:
+#+begin_src sh
+echo uinput | sudo tee /etc/modules-load.d/uinput.conf
+echo 'KERNEL=="uinput", GROUP="input", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/99-uinput.rules
+sudo usermod -aG input nabeel
+sudo reboot
+#+end_src
+Then add this line to =~/.xinitrc=, before =exec stumpwm=:
+#+begin_src sh
+xremap --watch=device,config ~/guix-config/.config/xremap/xremap.yaml &
+#+end_src
+The trade-off: membership in the =input= group can read every keyboard. Under X11, any program you run can already log keystrokes, so this adds little on this machine.
+
+** TODO 7.3 Containers (only if you need them)
+=make distrobox= assumes Guix System, because it mounts =/run/current-system=. On Debian you may not need it at all. If you do, run =sudo apt install podman distrobox=.
+
+* Phase 8 — Wrap up
+** TODO 8.1 Retire config-thinkpad.scm
+The =Makefile= already ignores it on Debian. Git history keeps it.
+#+begin_src sh
+cd ~/guix-config
+git rm config-thinkpad.scm
+git commit -m "thinkpad: now Debian + Guix; drop its Guix System config"
+git push
+#+end_src
+
+** TODO 8.2 Done checklist [0/11]
+- [ ] =mokutil --sb-state=: *disabled*, on purpose (D7), and =sudo fwupdmgr get-updates= has nothing pending
+- [ ] The LUKS passphrase is asked at boot; =lsblk -f= shows =crypto_LUKS=
+- [ ] =sudo ufw status=: active; =sudo ss -tlnp= shows nothing unexpected listening
+- [ ] =unattended-upgrades=: Debian-Security and Tailscale origins allowed (7.1)
+- [ ] The 5.3 checks pass after 5.4; =guix build hello= downloads rather than builds
+- [ ] StumpWM starts from tty1; no locale warnings; fonts look right
+- [ ] The screen locks on lid close and on =loginctl lock-session=, and your password unlocks it
+- [ ] Wi-Fi, Bluetooth, sound (=pavucontrol=), suspend and resume
+- [ ] =tailscale status= works, and the old node is deleted
+- [ ] Emacs starts cleanly; =magit= can push
+- [ ] =sudo systemctl hibernate= powers off, and the next boot asks the LUKS passphrase and restores the session (4.7)
+
+* Appendix
+** A. Keeping it patched
+| What                                    | How                                                        | Automatic?                                  |
+|-----------------------------------------+------------------------------------------------------------+---------------------------------------------|
+| Debian: kernel, X, i3lock, OpenSSH, …   | =unattended-upgrades= (4.3)                                | yes; then reboot when flagged (4.3)         |
+| Tailscale                               | =unattended-upgrades= with =origin=Tailscale= (7.1)        | yes                                         |
+| *guix-daemon*                           | =sudo -i guix pull && sudo systemctl restart guix-daemon=  | *no*: run it whenever a Guix advisory lands, and every few weeks |
+| Your Guix apps                          | =guix pull && make apply-guix-profile=                     | no                                          |
+| Firmware updates (=fwupd=)              | =sudo fwupdmgr refresh && sudo fwupdmgr update=            | no: check now and then                      |
+For advisories, watch https://guix.gnu.org/en/blog/ or subscribe to =info-guix@gnu.org=. The July 2026 flaw is the reason this file exists.
+
+** B. Troubleshooting
+- *=F12= lists the stick, but choosing it does nothing*: the ISO went to a partition (=/dev/sdb1=) instead of the device (=/dev/sdb=), so the firmware sees the stick's old partition table and no EFI loader. =lsblk -o NAME,FSTYPE,SIZE,LABEL /dev/sdb= shows the giveaway: =iso9660= sitting on =sdb1= at the stick's full size. Rewrite it as in 2.2.
+- *=F12= lists old entries such as =grub= or =artix= that do nothing*: stale UEFI boot entries in NVRAM from earlier installs, pointing at files that no longer exist. Harmless. After the install, =sudo efibootmgr -v= lists them and =sudo efibootmgr -b <NN> -B= deletes one.
+- *=systemctl hibernate= fails with "Not enough swap space"*: swap is smaller than RAM. Grow it as in [[*4.7 Hibernation (D7)][4.7]].
+- *The machine boots a fresh session instead of resuming*: =/etc/initramfs-tools/conf.d/resume= points at the wrong swap. If it names a =UUID=, that UUID went stale when 4.7 ran =mkswap=; if it names a =/dev/mapper/…= path, check the path still exists. Fix it, then =sudo update-initramfs -u -k all=.
+- *=systemctl hibernate= says the operation isn't supported*: Secure Boot is on, which locks the kernel down. Turn it off in BIOS setup (3.1, D7).
+- *The USB stick or network boot won't start when Secure Boot is on* ("Security violation" / "verification failed"): the firmware's db lacks a CA the shim needs. Turn Secure Boot off, install, do 4.2 (=fwupd= adds the 2023 CA), turn it back on, and confirm with =mokutil --sb-state=.
+- *=guix-install.sh= says "Missing commands: newgidmap"*: run =sudo apt install uidmap=.
+- *The daemon runs as =root=*: the installer took the privileged path. Either the unit had no =User=guix-daemon= (wrong tarball), or systemd wasn't detected. Uninstall and redo 5.1–5.2.
+- *AppArmor blocks builds*: =sudo journalctl -k | grep 'apparmor="DENIED".*guix'=. Report it upstream. As a last resort, run =sudo apt install apparmor-utils && sudo aa-complain guix-daemon=.
+- *A local build fails with =chown= / =OSError: [Errno 22] Invalid argument=*: that's the unprivileged daemon (D1). Wait for a substitute, build it on the pc (only once the pc is reinstalled), or for your own packages use =--without-tests=<package>=.
+- *Locale warnings in Guix apps*: =glibc-locales= is in the manifest. Open a new login shell so =GUIX_LOCPATH= is set.
+- *Guix apps can't find fonts*: run =fc-cache -f=.
+- *blueman or udiskie only half work*: they need system D-Bus services that a Guix profile can't register, and your Guix profile shadows =/usr/bin= in =PATH=. 4.5 installs Debian's =blueman= and 6.6 calls it by absolute path; =type -a blueman-applet= shows which copy you'd get. For =udiskie=, =udisks2= from 4.5 is what matters; if it still misbehaves, =sudo apt install udiskie= and call =/usr/bin/udiskie= the same way.
+- *StumpWM doesn't start after a tty1 login*: =hostname= must print =thinkpad=. Check the =.bash_profile= block from 6.6.
+- *=make apply-guix-profile= skips =thinkpad-manifest.scm=*: =hostname= must be =thinkpad=, and =/etc/os-release= must not contain =ID=guix=.
+- *No Wi-Fi after 4.6*: =nmcli device= shows "unmanaged" if =/etc/network/interfaces= still lists the device.
+- *Network boot: =dnsmasq= logs nothing*: on the pc, =ip -br link= must show the Ethernet port =UP= with =LOWER_UP=, which means the cable is seated at both ends. On the T460, /UEFI IPv4 Network Stack/ must be on. If it tries IPv6 first, wait for that to time out.
+- *Network boot: =DHCPACK=, but no =sent= lines*: something on the pc blocks TFTP (UDP port 69). =sudo "$IPT" -S INPUT= should show =-P INPUT ACCEPT=, which is the pc's default.
+- *Network boot: GRUB can't find =/debian-installer/amd64/linux=*: =--tftp-root= must be the directory that contains =debian-installer/= (E.2).
+- *Route P: the installer can't reach the mirror*: on the pc, =sysctl net.ipv4.ip_forward= must print =1=, and =sudo "$IPT" -S FORWARD= and =sudo "$IPT" -t nat -S POSTROUTING= must show the E.4 rules. Check that the pc itself is online.
+
+** C. At-risk survey script
+Save it as =~/repo-risk.sh= and run it with =bash ~/repo-risk.sh=. It's read-only.
+#+begin_src sh
+#!/usr/bin/env bash
+# repo-risk: every git repo under $HOME and what would be lost if $HOME vanished.
+cd "$HOME" || exit 1
+find . \( -path ./.cache -o -path ./.local/share/containers -o -path ./.local/share/Trash \
+          -o -path ./.emacs.d/elpaca -o -path ./.cargo -o -path ./.rustup -o -path ./go/pkg \
+          -o -name node_modules \) -prune \
+       -o -name .git -print 2>/dev/null | sed 's#^\./##; s#/\.git$##' | sort |
+while read -r r; do
+  cd "$HOME/$r" || continue
+  out=""
+  [ -z "$(git remote 2>/dev/null)" ] && out+=" NO-REMOTE"
+  n=$(git status --porcelain 2>/dev/null | wc -l);   [ "$n" -gt 0 ] && out+=" uncommitted:$n"
+  s=$(git stash list 2>/dev/null | wc -l);           [ "$s" -gt 0 ] && out+=" stashes:$s"
+  u=$(git rev-list --count --branches --not --remotes 2>/dev/null)
+  [ "${u:-0}" -gt 0 ] && out+=" unpushed-commits:$u"
+  printf '%-62s %s\n' "$r" "${out:- ok}"
+done
+#+end_src
+
+** D. Facts and sources (checked 2026-09-21)
+*Re-checked 2026-10-03, before the T460 run:* Debian 13.7.0 is still the current netinst ISO, and =SHA512SUMS.sign= still verifies against the CD key =DF9B 9C49 …=. =trixie= is still Release 13.7 of 2026-09-12. The netboot chain of [[*E. Network boot instead of a USB stick][Appendix E]] still holds, with =netboot.tar.gz= unchanged at =82b46512…=. The CI tarball moved on: 5.1 now uses the newest build, =25622019= / =/download/4029=, verified the same way, and the older =/download/4002= is still served as a fallback. The pc was still half-migrated: store owned by =root root=, old daemon running as uid 958.
+- Debian 13.7.0 is the current point release. Checksums are signed by the Debian CD key: https://www.debian.org/CD/verify
+- Debian removed its =guix= package from trixie in 13.1 because of unpatched daemon flaws, hence the upstream installer: https://lwn.net/Articles/1035491/
+- Secure Boot and hibernation are mutually exclusive, which is what [[*D7 — Secure Boot or hibernation][D7]] decides. Debian's wiki, read 2026-10-03: "Using Secure Boot activates "lockdown" mode in the Linux kernel. This disables various features that can be used to modify the kernel: … Using kexec to start an unsigned kernel image. Hibernation and resume from hibernation. User-space access to physical memory and I/O ports." Source: https://wiki.debian.org/SecureBoot
+- Secure Boot CA rollover (only needed if D7 is revisited):
+  - https://wiki.debian.org/SecureBoot/CAChanges (=mokutil= checks, =fwupd= updates, the KEK note)
+  - Debian 13.6 point-release notes (dual-signed shim, fwupd 2.0.20): https://www.debian.org/News/2026/20260711
+  - fwupd's docs (the Lenovo P50 example): https://fwupd.github.io/libfwupdplugin/uefi-db.html
+- Guix CI tarball:
+  - build =25622019=, eval =2208682=, channel commit =825f07432a57bd1ba7126d84d1c55a0136c828c8= (2026-09-25)
+  - =slnb56lpyly2q537mg69nshbpxblvic6-guix-binary.tar.xz=, =147244972= bytes
+  - contains =guix-1.5.0-7.5ceffb6=, newer than the pc's ISO daemon =64d4de2= (=REINSTALL-pc.org=, Appendix E)
+  - earlier choice, still served and still patched: build =25470813=, eval =2206868=, commit =c9827f9ef182a0983bf51f940bdfc5f262b261e8=, =145373948= bytes, =guix-1.5.0-6.64d4de2=
+- Upgrading the daemon on a foreign distro, from the Guix manual section "Upgrading Guix" (read 2026-10-03, https://guix.gnu.org/manual/devel/en/guix.html): "If you installed Guix on a foreign distro with =guix-install.sh=, you can upgrade the build daemon by running: =sudo -i guix pull= followed by … =systemctl restart guix-daemon.service=". The same manual warns, about reconfiguring Guix System: "=sudo guix= runs your user's =guix= command and not root's, because =sudo= leaves =PATH= unchanged. The difference matters here, because =guix pull= updates the =guix= command and package definitions only for the user it is run as." On Guix System the daemon is upgraded by reconfiguring instead.
+- =guix-install.sh= (Codeberg master, identical to the Savannah copy):
+  - =GUIX_BINARY_FILE_NAME= skips the GPG check.
+  - The unprivileged daemon is chosen when systemd is present and the unit has =User=guix-daemon=.
+  - It requires =newgidmap=.
+- AppArmor profile: https://codeberg.org/guix/guix/src/branch/master/etc/apparmor.d/guix-daemon
+- Guix advisory: https://guix.gnu.org/en/blog/2026/guix-substitute-pull-vulnerabilities/
+  - Its last code block is a 422-line test script, run as =guix repl -- <file>.scm=, which attempts all four vulnerabilities and prints =vulnerable= / =not vulnerable= per bug, exiting non-zero if any. 5.3 extracts it from the page; there is no separate download link. Checked 2026-10-03: the extraction yields 422 lines and Guile reads all 17 top-level forms.
+  - Its "Mitigation" section is also the source for the rule that =--no-substitutes= only helps against *remote* attackers: "It's always possible to turn substitutes back on for an individual client", so a local attacker is unaffected by it.
+- Unprivileged daemon design: https://hpc.guix.info/blog/2025/03/build-daemon-drops-its-privileges/
+- Tailscale's apt repo for trixie: https://pkgs.tailscale.com/stable/debian (Release file: =Origin: Tailscale=)
+- Debian netboot image, for [[*E. Network boot instead of a USB stick][Appendix E]] (checked 2026-09-22, Release 13.7 of 2026-09-12):
+  - Chain: =dists/trixie/InRelease= is signed by the 13/trixie archive and release keys (fingerprints: https://ftp-master.debian.org/keys.html). It lists the hash of =installer-amd64/current/images/SHA256SUMS=, which lists =netboot.tar.gz=. E.1 ran end to end: both signatures good, =netboot.tar.gz: OK=.
+  - =bootnetx64.efi= is shim, signed with both Microsoft's 2011 and 2023 UEFI CAs, like the ISO's.
+  - The signed =grubx64.efi= has the prefix =/debian-installer/amd64/grub= built in, so the tarball's top directory is the TFTP root.
+  - The E.5 command passes =dnsmasq --test= with the store's 2.90 and 2.92. Guix's =iptables= is the legacy backend, the same one =iptables-service-type= uses.
+  - The flaw needs a download: "The remote exploitation of guix substitute only requires that the vulnerable system attempt to download a binary substitute" (the advisory). 2.0 and E.0 therefore run store copies directly.
+
+** E. Network boot instead of a USB stick
+This replaces the USB stick in Phase 2 and 3.1. Nothing else changes. The pc side works before or after the pc reinstall, because it never asks =guix= to download anything (E.0).
+#+begin_example
+   internet
+      │ Wi-Fi
+┌─────┴──────────────┐  Ethernet cable  ┌─────────────┐
+│ pc   10.99.0.1     │──────────────────│ T460        │
+│ dnsmasq: address,  │  only these two  │ 10.99.0.5x  │
+│ boot files, DNS    │  machines on it  │             │
+└────────────────────┘                  └─────────────┘
+#+end_example
+- *How it works:* at =F12= → network, the T460's firmware asks the network for an address and a boot file. =dnsmasq= on the pc answers, then serves Debian's netboot files over TFTP.
+- *Why E.1 and the direct cable matter:* with Secure Boot off (D7), the firmware checks none of these files, and TFTP has no authentication either. So the pc verifies the image before serving it, and nothing else is on the cable to swap it. (Even with Secure Boot on, shim, GRUB and the kernel are checked but the initrd is not.)
+- The installer runs from RAM, so it can still wipe the whole disk. It downloads its packages from Debian, so the T460 needs internet. Pick a route:
+  - *Route R, your router is within reach (recommended).* The pc only serves the boot. Once the installer's first screen is up, move the cable from the pc to the router. Skip E.4: the pc never forwards traffic.
+  - *Route P, the pc shares its internet.* The cable stays on the pc until the T460 has Wi-Fi (4.6). The pc routes the T460's traffic out through its own Wi-Fi (E.4).
+- The netboot image has no Wi-Fi firmware, so install over the cable either way. 4.1 installs =firmware-iwlwifi=.
+
+*** TODO E.0 Find the tools (pc)
+Run [[*2.0 Tools on the pc, without downloading][2.0]] first: it explains why nothing here goes through =guix=, and it defines =newest= and =$GPG=. In the same shell, add the two tools only network boot needs:
+#+begin_src sh
+DNSMASQ=$(newest '*-dnsmasq-2.*/sbin/dnsmasq')
+IPT=$(newest '*-iptables-1.*/sbin/iptables')
+[ -x "$DNSMASQ" ] && [ -x "$IPT" ] || echo "MISSING ONE OF THEM: STOP, see 2.0"
+"$DNSMASQ" --version | head -1                    # 2.92 on 2026-10-03, and it does print "version UNKNOWN"
+"$IPT" --version                                  # 1.8.11 on 2026-10-03
+#+end_src
+- The =dnsmasq= it picks is the one the pc's NetworkManager already uses.
+
+*** TODO E.1 Download and verify the netboot image
+#+begin_src sh
+mkdir -p ~/Downloads/debian-netboot && cd ~/Downloads/debian-netboot
+B=https://deb.debian.org/debian/dists/trixie
+I=$B/main/installer-amd64/current/images
+curl -fL -O "$B/InRelease" -O "$I/SHA256SUMS" -O "$I/netboot/netboot.tar.gz"
+
+export GNUPGHOME=$(mktemp -d)                     # throwaway keyring
+curl -sSL https://ftp-master.debian.org/keys/archive-key-13.asc https://ftp-master.debian.org/keys/release-13.asc \
+  | "$GPG" --import
+"$GPG" --output Release --decrypt InRelease       # checks it, keeps only the signed part
+grep -E "^ $(sha256sum SHA256SUMS | cut -d' ' -f1) +[0-9]+ main/installer-amd64/current/images/SHA256SUMS$" Release
+sed -n 's# \./netboot/netboot\.tar\.gz$# netboot.tar.gz#p' SHA256SUMS | sha256sum -c   # "netboot.tar.gz: OK"
+#+end_src
+- Expect two =Good signature= lines: "Debian Archive Automatic Signing Key (13/trixie)", primary key fingerprint =04B5 4C3C DCA7 9751 B16B  C6B5 2256 29DF 75B1 88BD=, and "Debian Stable Release Key (13/trixie)", =4158 7F7D B8C7 74BC CF13  1416 762F 67A0 B2C3 9DE4=. Both are listed at https://ftp-master.debian.org/keys.html.
+- One =Can't check signature: No public key= line, for key =4CB50190207B4758A3F73A796ED0E7B82643E131=, is expected. Debian also signs with the 12/bookworm archive key, which you didn't import.
+- The =grep= must print one line: the signed release vouching for =SHA256SUMS=.
+- A =BAD signature=, another fingerprint, an empty =grep= or =FAILED=: *STOP*. If Debian published an update between your downloads, the hashes won't match: delete the four files and start again.
+
+*** TODO E.2 Put it where the TFTP server can read it
+#+begin_src sh
+sudo mkdir -p /srv/tftp
+sudo tar -C /srv/tftp -xzf netboot.tar.gz
+ls -l /srv/tftp/debian-installer/amd64/bootnetx64.efi   # -rw-r--r-- root root
+#+end_src
+=dnsmasq= serves files as the user =nobody=, which can't read your home directory. Hence =/srv/tftp=.
+
+*** TODO E.3 Set up the pc's Ethernet port
+Connect the pc and the T460 with the cable.
+#+begin_src sh
+ip -br link                                       # the pc's Ethernet port: enp128s31f6 on 2026-09-22
+IF=enp128s31f6
+sudo nmcli device set "$IF" managed no            # NetworkManager leaves the port alone until E.7
+sudo ip addr add 10.99.0.1/24 dev "$IF"
+sudo ip link set "$IF" up
+#+end_src
+10.99.0.0/24 clashes with neither your home network (192.168.1.0/24) nor Tailscale (100.64.0.0/10).
+
+*** TODO E.4 Share the pc's internet (route P only)
+#+begin_src sh
+UP=$(ip route show default | awk '{print $5; exit}'); echo "$UP"   # the pc's Wi-Fi: wlp128s20f3 on 2026-09-22
+sysctl -n net.ipv4.ip_forward                     # note it for E.7 (0 on 2026-09-22)
+sudo "$IPT" -I FORWARD 1 -i "$UP" -o "$IF" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+sudo "$IPT" -I FORWARD 2 -i "$UP" -o "$IF" -j DROP
+sudo "$IPT" -I FORWARD 3 -i "$IF" -o "$UP" -j ACCEPT
+sudo "$IPT" -t nat -A POSTROUTING -s 10.99.0.0/24 -o "$UP" -j MASQUERADE
+sudo sysctl -w net.ipv4.ip_forward=1
+#+end_src
+- The T460 can open connections out through the pc. The =DROP= rule stops anything on your Wi-Fi from opening one in. Replies to the T460's own connections still get through.
+- Forwarding is switched on last, so the rules are in place first. E.7 switches it off again.
+
+*** TODO E.5 Start the boot server
+#+begin_src sh
+sudo "$DNSMASQ" --no-daemon --conf-file=/dev/null --log-dhcp --leasefile-ro --pid-file=/run/pxe-dnsmasq.pid \
+  --interface="$IF" --except-interface=lo --bind-interfaces \
+  --dhcp-range=10.99.0.50,10.99.0.99,1h \
+  --enable-tftp --tftp-root=/srv/tftp \
+  --dhcp-boot=debian-installer/amd64/bootnetx64.efi
+#+end_src
+- It stays in the foreground and logs every request. Leave the terminal open. =Ctrl-C= stops it.
+- It answers only on the cable port. *Never point it at the Wi-Fi port*: it would hand out addresses to every device in the house, fighting your router.
+- It also answers DNS on 10.99.0.1, by forwarding to whatever the pc uses. Route P needs that.
+
+*** TODO E.6 Boot the T460 from the network
+Do 3.1, with two changes:
+- Also set /Config → Network → UEFI IPv4 Network Stack/: *Enabled*. If there's a /UEFI PXE Boot Priority/, set it to *IPv4 First*.
+- At =F12=, pick the network entry (Lenovo labels it along the lines of /PCI LAN/), not a USB stick.
+The pc's terminal shows =DHCPDISCOVER= and =DHCPACK=, then =sent /srv/tftp/…= for =bootnetx64.efi=, =grubx64.efi=, =grub.cfg=, =linux= and the 40 MB =initrd.gz=. Debian's GRUB menu appears: continue with 3.2.
+- *Route R:* when /Select a language/ appears, move the cable from the pc to the router. Stop =dnsmasq= with =Ctrl-C= and do E.7 now. The installer asks for an address only at its network step, after language, location and keyboard, so it gets one from the router.
+- *Route P:* leave E.4 and E.5 running through Phase 4, until 4.6 gives the T460 Wi-Fi. The installer puts Debian first in the boot order, so after the first reboot the T460 starts from its disk and gets its address from =dnsmasq= again. If the pc reboots in between, redo E.3–E.5. Then do E.7.
+
+*** TODO E.7 Clean up (pc)
+In a new terminal, first set =IPT=, =IF= and =UP= again as in E.0, E.3 and E.4.
+#+begin_src sh
+# Route P only: undo E.4. Use the value you noted (0 on 2026-09-22).
+sudo sysctl -w net.ipv4.ip_forward=0
+sudo "$IPT" -t nat -D POSTROUTING -s 10.99.0.0/24 -o "$UP" -j MASQUERADE
+sudo "$IPT" -D FORWARD -i "$IF" -o "$UP" -j ACCEPT
+sudo "$IPT" -D FORWARD -i "$UP" -o "$IF" -j DROP
+sudo "$IPT" -D FORWARD -i "$UP" -o "$IF" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+
+# Both routes:
+sudo ip addr flush dev "$IF"
+sudo nmcli device set "$IF" managed yes
+sudo rm -rf /srv/tftp
+#+end_src
+- Rebooting the pc also undoes everything here except =/srv/tftp=.
+- On the T460, you can switch /UEFI IPv4 Network Stack/ back off. Nothing needs it after the install.
