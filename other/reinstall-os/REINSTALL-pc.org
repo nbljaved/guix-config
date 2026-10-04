@@ -236,7 +236,17 @@ mkdir -p ~/.age && chmod 700 ~/.age
 scp 'nabeel@pc:~/.age/key*' ~/.age/ && chmod 600 ~/.age/key
 age -d ~/Documents/personal/diary/diary.org.age | head -1     # prove it before the pc is wiped
 #+end_src
-   If you'd rather not have the key sitting on two disks: =age -p < ~/.age/key > key.age=, commit =key.age= to =personal-documents=, and keep *that* passphrase on paper. The ciphertext is useless without it, and =age= is one =apt install= away.
+   *Or wrap it in a passphrase and let git carry it.* =age= can passphrase-protect an identity file, the way OpenSSH does with a private key, and it can use the wrapped file directly — so a copy can live in a private repo instead of on a second disk. Checked on 2026-10-04 with =age 1.3.1=:
+#+begin_src sh
+age -p -o ~/.age/key.age ~/.age/key     # asks for a passphrase twice; scrypt, work factor 18
+head -2 ~/.age/key.age                  # "-> scrypt … 18": the wrapper, not the key
+age -d -i ~/.age/key.age ~/Documents/personal/diary/diary.org.age | head -1
+                                        # "Enter passphrase for identity file …" then the plaintext
+age -d -o ~/.age/key ~/.age/key.age     # unwrap, e.g. on the reinstalled machine (3.4)
+#+end_src
+   Then commit =key.age= to =personal-documents= and keep *that* passphrase on paper. Two things to know before relying on it:
+   - *It only works at a terminal.* age reads the passphrase from the tty and will not take it from a pipe or an environment variable, so scripts and =age.el= inside Emacs (which talks to age over pipes, with no pinentry) cannot use a wrapped identity. Keep the plaintext =~/.age/key= on the machine for day-to-day use, and treat =key.age= as the copy that travels.
+   - age's own man page makes the same point: a passphrase on the identity "is not necessary for most use cases, where access to the encrypted identity file implies access to the whole system". It buys you safety for the copy that leaves the machine, which is exactly this step.
 2. *=~/.ssh/id_ed25519=.* Not strictly irreplaceable: you can delete the old =pc= key on github.com and add a fresh one from the new install (3.4). Copy it only if you want the same identity. What matters instead is the fallback in 1.8.
 3. *The Mullvad account number* (=~/.mullvad=). A 16-digit number /is/ the account; there is no email login behind it. Open the app, read it, write it on paper.
 4. *Wi-Fi passwords*, so you aren't guessing later:
@@ -492,7 +502,7 @@ Wi-Fi now works (nonguix kernel + =linux-firmware=). Either use =nmcli device wi
 ** TODO 3.4 Put the two keys back
 No archive (D3). =~/.gitconfig= and =~/.config/git/ignore= come from =shell-config= in 3.6, so only the keys need hands here.
 
-=~/.age/key=: this machine has no network secrets yet, and the T460 has no SSH server, so *push it from the T460* (or retype the one line from your paper):
+=~/.age/key=: this machine has no network secrets yet, and the T460 has no SSH server, so *push it from the T460* (or retype the one line from your paper, or unwrap the =key.age= from your repo with =age -d -o ~/.age/key key.age=, see 1.6):
 #+begin_src sh
 # on the thinkpad:
 scp ~/.age/key ~/.age/key.pub nabeel@pc:.age/
