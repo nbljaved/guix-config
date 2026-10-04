@@ -68,6 +68,7 @@ The reinstall trades those unattended hours, and the fiddly step 4, for about 1�
 - An external drive with at least *20 GB* free. The home archive is roughly 12–15 GB before compression.
 - One *age passphrase* protects both archives. The archives contain your SSH and age private keys. *Write the passphrase on paper.* Without it the backup is useless.
 - If the drive is FAT32 (=vfat= in =df -T=), no single file can exceed 4 GiB. Use the =split= variant in [[*1.6 Back up home (encrypted)][1.6]].
+- *Don't copy the T460's choice here.* The T460 ran with no backup at all (its D8), and that was nearly free because this machine still held a second copy of everything. Nothing holds a second copy of *this* machine: =~/.age/key= (which decrypts the diary), =~/.claude= 258M, =~/.librewolf= 1.1G, =~/.telega= 369M, Chrome's profile, =~/Calibre Library=, =~/Downloads/brilliant-cv= and the loose files in =~= all exist only here. The full survey is in =REINSTALL-thinkpad.org=, Appendix F.
 
 ** D4 — network during the install
 - Plug an *Ethernet cable* into the onboard port. The installer can't use your Wi-Fi.
@@ -479,6 +480,12 @@ ln -sf  ~/shell-config/starship/starship.toml ~/.config/starship.toml
 mkdir -p ~/.config/guix
 ln -sf  ~/guix-config/channels.scm            ~/.config/guix/channels.scm
 ln -sf  ~/guix-config/nix-config/nix-channels ~/.nix-channels
+ln -sf  ~/shell-config/.sbclrc                ~/.sbclrc
+ln -sf  ~/shell-config/.Xresources            ~/.Xresources     # Xft.dpi 192, this machine's 4K panel
+ln -sf  ~/shell-config/.Xdefaults             ~/.Xdefaults
+ln -sf  ~/shell-config/.gitconfig             ~/.gitconfig
+mkdir -p ~/.config/git
+ln -sf  ~/shell-config/git/ignore             ~/.config/git/ignore
 mkdir -p ~/.claude/skills/screenshot
 ln -sf  ~/guix-config/.config/useful-docker-images/shot-scraper/claude-skills/shot-scraper.md ~/.claude/skills/screenshot/SKILL.md
 # after ~/quicklisp is restored (3.9):
@@ -507,7 +514,7 @@ emacs      # first start: elpaca clones and builds ~200 packages. Let it finish,
 #+end_src
 
 ** TODO 3.9 StumpWM and Common Lisp
-Restore =~/quicklisp= and =~/.sbclrc= from the backup (3.13) instead of reinstalling Quicklisp, then create the =clx-truetype= link from 3.6. If you'd rather start fresh, follow =~/.stumpwm.d/Readme.org= (https://www.quicklisp.org/beta/).
+Either restore =~/quicklisp= from the backup (3.13), or rebuild it from upstream with =bash ~/.stumpwm.d/bootstrap-quicklisp.sh=, which checks the installer's signature and makes the =clx-truetype= link itself. =~/.sbclrc= is no longer backup material: it lives in =shell-config= and 3.6 symlinks it. Quicklisp exists here only for =clx-truetype=, which =load-fonts.lisp= needs for the StumpWM font on this screen, and for =alert-me=.
 
 ** TODO 3.10 Nix
 #+begin_src sh
@@ -602,8 +609,11 @@ git add -A config-pc.scm channels-lock.scm && git commit -m "pc: post-reinstall 
 | =~/Calibre Library=, =~/.config/calibre=               | 2.5M   | e-book library                        | yes       |
 | =~/.local/share/fonts=, =~/.fonts=                     | 104M   | user fonts                            | yes       |
 | =~/qa-questions.org=, =~/guix-home-config.scm=         | small  | loose files in =~=                    | yes       |
-| =~/.bash_history=, =~/.org-timestamps=, =~/.Xresources=, =~/.sbclrc=, =~/.slynkrc= | small | history and small configs | yes |
-| =~/quicklisp=, =~/.roswell=                            | 178M   | Lisp setup (saves reinstalling)       | yes       |
+| =~/.bash_history=, =~/.org-timestamps=                  | small  | history                               | yes       |
+| =~/.Xresources=, =~/.Xdefaults=, =~/.sbclrc=, =~/.gitconfig= | small  | in =shell-config= since 2026-10-04; 3.6 symlinks them | n/a |
+| =~/.slynkrc=                                           | small  | tangled from =Emacs.org= (3.8)          | n/a       |
+| =~/quicklisp=                                          | 13M    | rebuildable: =~/.stumpwm.d/bootstrap-quicklisp.sh= | optional |
+| =~/.roswell=                                             | 165M   | Lisp setup (saves reinstalling)       | yes       |
 | SSH host keys, =/var/lib/tailscale=, NM profiles       | small  | host identity, tailnet node, Wi-Fi    | system.tar.age |
 | =~/.local/share/containers=                            | 13G    | rebuilt with =make distrobox=         | no        |
 | =/nix=                                                 | 21G    | rebuilt with =make apply-nix-profile= | no        |

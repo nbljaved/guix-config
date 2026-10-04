@@ -94,6 +94,13 @@ You can't have both. Debian's kernel enters "lockdown" when Secure Boot is on, a
 - So the cost of this choice is that bootkit protection and kernel lockdown. The gain, besides hibernation, is that [[*4.2 Firmware updates (fwupd)][4.2]] drops the whole Microsoft-CA-expiry problem.
 - To change your mind later: enable Secure Boot in BIOS setup, do the CA work described in 4.2, and expect =systemctl hibernate= to stop working.
 
+** D8 — Backups
+- *No backup drive (chosen 2026-10-04).* The bet is that everything you need is in a GitHub repo. [[*F. What lives only outside git (surveyed 2026-10-04)][Appendix F]] is the survey that says how good a bet it is. So 1.3 and 1.4 were not run, and the restore steps are replaced: see [[*6.1 SSH key and secrets][6.1]], [[*6.7 Emacs, StumpWM and Quicklisp][6.7]] and [[*6.8 What you don't have, and where to get it][6.8]].
+- What makes it cheap *here*: the pc still has its home directory. Anything the T460 had that isn't on GitHub — =~/.age/key=, =~/.Xresources=, =~/.sbclrc= — exists on the pc too, so the copy of record moved from a drive to a machine rather than disappearing.
+- What it costs: the T460's Wi-Fi passwords, its =~/.bash_history=, its browser profile and anything you kept only there. Phase 3 already took those.
+- *It does not transfer to =REINSTALL-pc.org=.* The pc is the second copy for both machines, and nothing is the second copy for the pc. Its D3 wants a real drive.
+- Standing consequence: =git push= is now the backup. Nothing uncommitted survives a reinstall, on either machine.
+
 * Phase 0 — Prerequisites
 ** TODO 0.1 Push this plan; the pc reinstall can wait
 This plan works before or after =REINSTALL-pc.org=. The pc only helps, with the backup in 1.3 (route B) and with the USB stick or network boot in Phase 2. Until the pc is reinstalled, its daemon is unpatched and has substitutes enabled, so on the pc:
@@ -104,7 +111,7 @@ Push what the T460 needs after the wipe. Don't stage =config-pc.scm=: the pc run
 #+begin_src sh
 cd ~/guix-config
 git status --porcelain                            # see what else is pending before you stage
-git add REINSTALL-thinkpad.org REINSTALL-pc.org thinkpad-manifest.scm Makefile
+git add other/reinstall-os/ thinkpad-manifest.scm Makefile
 git commit -m "Add the T460 → Debian + Guix plan and the pc reinstall runbook"
 git push
 git log origin/main -1 --oneline                  # must show this commit
@@ -116,7 +123,7 @@ git log origin/main -1 --oneline                  # must show this commit
 
 ** TODO 0.2 Things to have ready
 - A USB stick of at least 1 GB. It gets erased. No stick? Network boot needs only an Ethernet cable: [[*E. Network boot instead of a USB stick][Appendix E]].
-- A backup drive with room for the T460's home directory, or plan to use the pc (route B in [[*1.3 Back up home (encrypted)][1.3]]). If the pc reinstall comes later, the same drive will also need the pc's 20 GB (its D3). Keep the T460 archive until the T460 is fully restored.
+- No backup drive: that's [[*D8 — Backups][D8]]. Instead, push every repo first ([[*1.2 Git repos: survey, commit, push][1.2]]). If you change your mind, 1.3 and 1.4 are still written out below, and the same drive would later need the pc's 20 GB (its D3).
 - An Ethernet cable, if you can. Wi-Fi works too.
 - The T460 on AC power.
 
@@ -136,7 +143,9 @@ grep -c 'define (rename-file\*' "$G/share/guile/site/3.0/guix/scripts/substitute
 ** TODO 1.2 Git repos: survey, commit, push
 Run the survey script in [[*C. At-risk survey script][Appendix C]]. Commit and push everything you care about. To rescue stashes, use the recipes in =REINSTALL-pc.org= step 1.1. Every line should say =ok=, or be something you consciously leave to the backup.
 
-** TODO 1.3 Back up home (encrypted)
+** 1.3 Back up home (encrypted) — not done (D8)
+*Not run on this machine.* Kept because it is the recipe =REINSTALL-pc.org= step 1.6 shares, and because the next machine may want it.
+
 Check which tools are already installed; don't install any:
 #+begin_src sh
 command -v age zstd gzip
@@ -182,13 +191,13 @@ ssh nabeel@"$T460" 'cd /home && tar -cpf - --exclude=nabeel/.cache --exclude=nab
 Optionally, save your Wi-Fi profiles so you don't retype passwords (route A; with route B, run the =sudo tar= over SSH the same way):
 #+begin_src sh
 sudo tar -cpf - /etc/NetworkManager/system-connections | age -p > "$BK/thinkpad-wifi.tar.age"
-cp ~/guix-config/REINSTALL-thinkpad.org "$BK/"
+cp ~/guix-config/other/reinstall-os/REINSTALL-thinkpad.org "$BK/"
 #+end_src
 - Use the same passphrase for both archives. *Write it on paper.*
 - If the drive is FAT32, no single file can exceed 4 GiB. Pipe through =split -b 3900M - "$BK/thinkpad-home….part-"= as in the pc runbook.
 - SSH host keys and Tailscale state are *not* saved on purpose. The new OS gets a fresh identity, and the old Tailscale node is deleted in [[*7.1 Tailscale][7.1]].
 
-** TODO 1.4 Verify the backup
+** 1.4 Verify the backup — not done (D8)
 Use =gzip -dc= or =zstd -dc= to match 1.3.
 #+begin_src sh
 set -o pipefail
@@ -374,7 +383,7 @@ sudo apt install \
 | =nscd=                         | the Guix manual recommends it on other distros, so Guix programs can look up users and hosts   |
 | =uidmap=                       | provides =newgidmap=: the installer refuses to set up the unprivileged daemon without it         |
 | =gnupg=, =wget=, =xz-utils=        | required by =guix-install.sh=                                                                    |
-| =git=, =curl=, =make=, =age=, =zstd=   | needed before Guix exists: cloning, the =Makefile=, restoring backups                            |
+| =git=, =curl=, =make=, =age=, =zstd=   | needed before Guix exists: cloning and the =Makefile=; =age= also decrypts =diary.org.age= (6.1)      |
 | =pulseaudio-utils=              | gives =pactl=, which your StumpWM volume and mic keys call; it talks to PipeWire through =pipewire-pulse= |
 | =brightnessctl=                 | for its udev rule, which lets the =video= group write =/sys/class/backlight=; your backlight keys need that |
 | =blueman=                       | the applet needs =blueman-mechanism=, a root D-Bus service that only a system package can register |
@@ -577,12 +586,15 @@ cat ~/.ssh/id_ed25519.pub            # add at https://github.com/settings/keys (
 ssh -T git@github.com                # "Hi nbljaved! …"
 #+end_src
 - On the same GitHub page, *delete the T460's old key*.
-- Restore only the small secrets you need from the backup. Use =zstd -dc= for a =.tar.zst.age= archive:
+- There is nothing to restore (D8). =~/.gitconfig= and =~/.config/git/ignore= now live in =shell-config= and are symlinked in [[*6.4 Recreate symlinks][6.4]], so cloning needs nothing else first.
+- =~/.age/key= is the one irreplaceable secret: it is what decrypts =Documents/personal/diary/diary.org.age=, it is in no repo, and it must never go into a public one. Copy it over *only* if you want the diary on the laptop. The pc still has it:
 #+begin_src sh
-BK=/media/nabeel/BACKUP/thinkpad-2026-09
-age -d "$BK/thinkpad-home.tar.gz.age" | gzip -dc | tar -xpf - -C /home nabeel/.gitconfig nabeel/.config/git
-# D5: add nabeel/.age to that list only if you need it here
+mkdir -p ~/.age && chmod 700 ~/.age
+scp 'nabeel@<pc LAN IP>:~/.age/key*' ~/.age/     # or the tailnet name, after 7.1
+chmod 600 ~/.age/key
+age -d ~/Documents/personal/diary/diary.org.age | head -1   # after 6.2; proves it works
 #+end_src
+  If the pc's =sshd= isn't reachable, carry it on the install USB stick instead — pushing from the pc won't work, because D4 left this laptop without an SSH server. Every extra machine holding that key is another place it can leak from, so skipping it is the safer default: the diary still opens on the pc.
 
 ** TODO 6.2 Clone your repos
 #+begin_src sh
@@ -592,11 +604,11 @@ git clone                      git@github.com:nbljaved/emacs-config.git    ~/.em
 git -C ~/.emacs.d remote add downstream git@github.com:nbl-natsoft/emacs-config.git
 git clone --recurse-submodules git@github.com:nbljaved/stumpwm-config.git  ~/.stumpwm.d
 git clone                      git@github.com:nbljaved/org-roam-files.git  ~/org/roam
-git -C ~/guix-config log -1 --oneline -- REINSTALL-thinkpad.org   # this file is in the repo
+git -C ~/guix-config log -1 --oneline -- other/reinstall-os/REINSTALL-thinkpad.org   # this file is in the repo
 #+end_src
 Clone any other repos you want on the laptop from the table in =REINSTALL-pc.org= step 3.5.
 
-** TODO 6.3 nonguix substitutes
+** DONE 6.3 nonguix substitutes
 Your manifest includes nonguix packages, such as =google-chrome-stable=. =signing-key.pub= is *nonguix's* key.
 #+begin_src sh
 sudo guix archive --authorize < ~/guix-config/signing-key.pub
@@ -614,7 +626,7 @@ sudo systemctl restart guix-daemon
 ps -o user=,args= -C guix-daemon | cut -c1-200       # guix-daemon … substitutes.nonguix.org
 #+end_src
 
-** TODO 6.4 Recreate symlinks
+** DONE 6.4 Recreate symlinks
 This is the subset of the pc's step 3.6 that applies here:
 #+begin_src sh
 mv ~/.profile ~/.profile.debian      # Debian's default; your .bash_profile would source it plus .bashrc twice
@@ -625,7 +637,16 @@ mkdir -p ~/.config/guix
 ln -sfn ~/shell-config/kitty                  ~/.config/kitty
 ln -sf  ~/shell-config/starship/starship.toml ~/.config/starship.toml
 ln -sf  ~/guix-config/channels.scm            ~/.config/guix/channels.scm
+# used to come off the backup; they are in shell-config now (D8):
+ln -sf  ~/shell-config/.sbclrc                ~/.sbclrc
+ln -sf  ~/shell-config/.Xresources.thinkpad   ~/.Xresources
+ln -sf  ~/shell-config/.Xdefaults             ~/.Xdefaults
+ln -sf  ~/shell-config/.gitconfig             ~/.gitconfig
+mkdir -p ~/.config/git
+ln -sf  ~/shell-config/git/ignore             ~/.config/git/ignore
 #+end_src
+- =.Xresources.thinkpad= is the laptop's copy, because the pc's sets =Xft.dpi: 192= for its 4K panel. Check what this one wants: =xdpyinfo | grep -B1 dimensions= prints the resolution and the physical size; 96 suits a 1366x768 T460 panel, 144 a 1920x1080 one. =~/.xinitrc= (6.6) merges it with =xrdb=.
+- =~/.slynkrc= is *not* symlinked: =Emacs.org= tangles it ([[*6.7 Emacs, StumpWM and Quicklisp][6.7]]).
 Your =.bashrc= already has a branch for distros other than Guix System. It sets =GUIX_LOCPATH=, =SSL_CERT_*= and sources the profile. Log out and back in afterwards.
 
 ** TODO 6.5 Guix: pull and install the profile
@@ -674,27 +695,40 @@ Use it in both places =bluetooth-start= names the program: the =executable?= tes
 - =udiskie-start= can stay as it is. The Guix =udiskie= only drives =udisks2=, which came from apt in 4.5.
 - Check what the session actually started: =pgrep -a blueman-applet= should show =/usr/bin/blueman-applet=, and pairing a device from the applet should work rather than failing silently.
 
-** TODO 6.7 Emacs and StumpWM
-Same as the pc's steps 3.8 and 3.9:
+** TODO 6.7 Emacs, StumpWM and Quicklisp
+Emacs is the pc's step 3.8. =Emacs.org= is the source of truth: it tangles =init.el=, =early-init.el= and =~/.slynkrc=.
 #+begin_src sh
 emacs --batch --eval "(require 'org)" --eval '(org-babel-tangle-file "~/.emacs.d/Emacs.org")'
 emacs        # first start: elpaca clones and builds its packages; restart Emacs afterwards
-#+end_src
-Restore =~/quicklisp= and =~/.sbclrc= from the backup (6.8), then:
-#+begin_src sh
-ln -sfn ~/.stumpwm.d/clx-truetype ~/quicklisp/local-projects/clx-truetype
+ls -l ~/.slynkrc                     # tangled, not symlinked
 #+end_src
 
-** TODO 6.8 Restore the remaining data
-Extract to a staging directory and copy back only what you want. Use =zstd -dc= for a =.zst= archive.
+*Quicklisp, rebuilt instead of restored (D8).* It is 13 MB of upstream libraries plus one symlink, so it was never backup material. Nothing in it is yours:
+- =~/.sbclrc= (symlinked in 6.4) loads =~/quicklisp/setup.lisp= only =(when (probe-file …))=, and =init.lisp= wraps the same load in =ignore-errors=, so StumpWM starts fine with no Quicklisp at all.
+- What you lose without it: =alert-me= (=modules.lisp= quickloads it, so =alert-me-at= disappears; every other module there comes from =load-module=), and nothing else *on this machine* — =load-fonts.lisp= is the only other user and =startup.lisp= loads it =(when pc?)=.
+To have it anyway, run the script in =~/.stumpwm.d=. It verifies the installer's OpenPGP signature against the Quicklisp release key, installs into =~/quicklisp=, links the =clx-truetype= submodule into =local-projects=, and quickloads it once so its nine dependency libraries land in the dist:
 #+begin_src sh
-mkdir -p ~/restore && cd ~/restore
-age -d "$BK/thinkpad-home.tar.gz.age" | gzip -dc | tar -xpf -
-O=~/restore/nabeel
-diff <(ls -A "$O") <(ls -A ~)        # what exists only in the backup
-rsync -a "$O/quicklisp" "$O/.sbclrc" "$O/.slynkrc" "$O/.Xresources" ~/   # add whatever else you want
+bash ~/.stumpwm.d/bootstrap-quicklisp.sh
+ls -l ~/quicklisp/local-projects/    # clx-truetype -> /home/nabeel/.stumpwm.d/clx-truetype
 #+end_src
-When you're done: =rm -rf ~/restore= (it contains keys). Keep the backup drive for a few weeks.
+- It needs =sbcl= (=thinkpad-manifest.scm=), =curl= and =gpg= (both from 4.5), and the network. It never calls =guix=, so it is also safe to run on the pc before its reinstall.
+- If you ever want the TrueType font on the laptop too, =load-fonts.lisp= hard-codes =/run/current-system/profile/share/fonts/=, which does not exist on Debian. It would have to become =~/.guix-profile/share/fonts/= (plus =/usr/share/fonts/=) before lifting the =(when pc?)= guard is worth trying.
+
+** TODO 6.8 What you don't have, and where to get it
+There is no archive (D8). This is what the old T460 home had that GitHub doesn't:
+| What                                                               | What to do about it                                                           |
+|--------------------------------------------------------------------+-------------------------------------------------------------------------------|
+| =.sbclrc=, =.Xresources=, =.Xdefaults=, =.gitconfig=, =.config/git/ignore= | symlinked from =shell-config= in 6.4                                            |
+| =~/.slynkrc=                                                         | tangled from =Emacs.org= in 6.7                                                 |
+| =~/quicklisp=                                                        | rebuilt from upstream in 6.7                                                  |
+| =~/.age/key=                                                         | only if you want the diary here: 6.1                                          |
+| Wi-Fi passwords                                                    | retype them once in =nm-applet=                                                 |
+| =~/.bash_history=, =~/.fehbg=, the browser profile, loose files in =~=   | gone. Chrome brings bookmarks and passwords back when you sign in             |
+| anything you notice later                                          | the pc still has its own copy of most of it; compare and =scp=                  |
+#+begin_src sh
+ssh nabeel@<pc> 'ls -A ~' > /tmp/pc-home; diff /tmp/pc-home <(ls -A ~) | less   # after 7.1
+#+end_src
+- The permanent rule from D8: on both machines, =git push= is the backup. [[*C. At-risk survey script][Appendix C]] is how you check, and [[*F. What lives only outside git (surveyed 2026-10-04)][Appendix F]] is what the last survey found.
 
 * Phase 7 — Services and extras (T460)
 ** TODO 7.1 Tailscale
@@ -743,7 +777,7 @@ git commit -m "thinkpad: now Debian + Guix; drop its Guix System config"
 git push
 #+end_src
 
-** TODO 8.2 Done checklist [0/11]
+** TODO 8.2 Done checklist [0/12]
 - [ ] =mokutil --sb-state=: *disabled*, on purpose (D7), and =sudo fwupdmgr get-updates= has nothing pending
 - [ ] The LUKS passphrase is asked at boot; =lsblk -f= shows =crypto_LUKS=
 - [ ] =sudo ufw status=: active; =sudo ss -tlnp= shows nothing unexpected listening
@@ -755,6 +789,7 @@ git push
 - [ ] =tailscale status= works, and the old node is deleted
 - [ ] Emacs starts cleanly; =magit= can push
 - [ ] =sudo systemctl hibernate= powers off, and the next boot asks the LUKS passphrase and restores the session (4.7)
+- [ ] Nothing is still waiting on a backup: =ls -l ~/.sbclrc ~/.Xresources ~/.gitconfig= point into =shell-config=, and =bash ~/repo-risk.sh= says =ok= on every line (D8)
 
 * Appendix
 ** A. Keeping it patched
@@ -960,3 +995,35 @@ sudo rm -rf /srv/tftp
 #+end_src
 - Rebooting the pc also undoes everything here except =/srv/tftp=.
 - On the T460, you can switch /UEFI IPv4 Network Stack/ back off. Nothing needs it after the install.
+
+** F. What lives only outside git (surveyed 2026-10-04)
+The survey behind [[*D8 — Backups][D8]]. It was run *on the pc*, which still holds both machines' habits, so it doubles as the list =REINSTALL-pc.org= must not lose. Re-run [[*C. At-risk survey script][Appendix C]] to refresh the first part.
+
+*The repos are fine.* All ten personal repos have a GitHub remote and nothing unpushed. But seven had uncommitted work that day, and with no drive that is exactly what a wipe takes:
+| Repo                                    | Uncommitted that day                                                       |
+|-----------------------------------------+----------------------------------------------------------------------------|
+| =Documents/personal/personal-documents=   | 11, incl. two appraisal PDFs, =resume/…/ai-project.{md,tex,pdf}=, =ats-lab/=   |
+| =Documents/public=                        | 6: the site rebuild and =posts/running-shot-scraper-in-guix.org=             |
+| =Documents/leetcode=                      | 2 system-design notes                                                      |
+| =Documents/personal/diary=                | 1: =diary.org.age= itself                                                    |
+| =.emacs.d=                                | =Emacs.org=, the file everything else is tangled from                        |
+| =shell-config=                            | =.bashrc=                                                                    |
+| =guix-config=                             | these runbooks and =thinkpad-manifest.scm=                                   |
+
+*No remote at all:* =~/Downloads/brilliant-cv= (17 uncommitted — it is a CV) and =~/Downloads/test= (22). Give =brilliant-cv= a private repo, or fold it into =personal-documents/resume=.
+
+*Not in git and not reproducible:*
+| What                                                                    | Size  | What it means                                                                                |
+|-------------------------------------------------------------------------+-------+----------------------------------------------------------------------------------------------|
+| =~/.age/key=                                                              | 12K   | the only thing that decrypts =diary.org.age=. One line of text: put it on paper or in a password manager, and/or keep an =age -p= copy in a private repo. Lose it and the diary is gone for good |
+| =~/.ssh/id_ed25519=                                                       | 24K   | replaceable: make a new key and swap it on GitHub (D5)                                       |
+| =~/Calibre Library=                                                       | 2.2M  | small enough for a private repo                                                              |
+| =~/.config/{hypr,mpv,xfce4,Thunar,htop,mimeapps.list,pavucontrol.ini}=    | <200K | the ones you care about belong in =shell-config=                                                |
+| =~/qa-questions.org=, =~/ai-questions.org=, =~/guix-home-config.scm=          | small | loose files in =~= with no repo                                                                |
+| =~/.claude= 258M, =~/.librewolf= 1.1G, =~/.telega= 369M, =~/.config/google-chrome= 1.6G, =~/.mullvad=, =~/.roswell=, =~/.gemini=, =~/.zai=, =~/.config/opencode= | GB | sessions, histories, credentials. Not git material. Without a drive, a reinstall means signing in to all of them again |
+
+*Already handled, for the record:* =~/.sbclrc=, =~/.Xresources=, =~/.Xdefaults=, =~/.gitconfig= and =~/.config/git/ignore= went into =shell-config= on 2026-10-04; =~/.slynkrc= is tangled from =Emacs.org=; =~/quicklisp= is rebuilt by =~/.stumpwm.d/bootstrap-quicklisp.sh=.
+
+*Regenerable, ignore:* =~/.local= (15G), =~/.npm= (3.6G), =~/.rustup=, =~/.bun=, =~/.cargo=, =~/go=, =~/node_modules=, =~/.emacs.d/elpaca=, =~/.fonts/font-cache.sexp=, =~/.config/guix= (symlinks), =~/.guile= (Guix's sample snippet), and =~/.profile= / =~/.zprofile= (Guix System artifacts; 6.4 renames Debian's own =.profile=).
+
+*Two things found while surveying:* =~/.config/backrest= has a backrest instance with no repositories and no plans, so nothing has ever been backed up with it. =~/.gnupg= holds no secret keys — only a trustdb, created on 2026-10-04 by a =gpg --show-keys= run.
