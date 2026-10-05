@@ -164,6 +164,8 @@ git diff --stat
 #+end_src
 Do *not* regenerate =channels-lock.scm= now. It would pin the unpatched guix again.
 
+*=make sync= is a capture, not a merge.* It rewrites =current-profile-manifest= from the live Guix profile and =nix-config/attribute-manifest.nix= from the live Nix profile (=scripts/extract-nix-packages.sh=), so anything added to those files but *not yet installed* is silently dropped, comments included. As of 2026-10-04 that applies to =pinentry=, which was added for =rage=/=age.el= and can only be installed here after this reinstall. Read =git diff= for deletions you did not intend before committing.
+
 ** TODO 1.3 Prepare config-pc.scm for the new install
 Three edits. First, the guix service block, which drops the TEMP lines. The variant below implements D1 = privileged. For unprivileged, add =(privileged? #f)=.
 #+begin_src scheme

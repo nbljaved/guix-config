@@ -15,6 +15,11 @@
   pkgs.kitty
   pkgs.opencode
   pkgs.pnpm
+  # rage: the Rust implementation of age.  It is here rather than in the Guix
+  # manifest because Guix's `rage` is Enlightenment's video player; this one
+  # supports pinentry, which age.el needs for passphrase-protected age
+  # identities and files (the age reference implementation refuses by design).
+  pkgs.rage
   pkgs.rclone
   pkgs.restic
   pkgs.scrcpy

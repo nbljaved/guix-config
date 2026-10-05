@@ -105,6 +105,7 @@
        "pavucontrol"
        "perl-image-exiftool"
        "picom"
+       "pinentry"
        "pre-commit"
        "python"
        "python-flake8"
