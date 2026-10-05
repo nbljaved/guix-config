@@ -647,7 +647,7 @@ ln -sf  ~/shell-config/git/ignore             ~/.config/git/ignore
 - =~/.slynkrc= is *not* symlinked: =Emacs.org= tangles it ([[*6.7 Emacs, StumpWM and Quicklisp][6.7]]).
 Your =.bashrc= already has a branch for distros other than Guix System. It sets =GUIX_LOCPATH=, =SSL_CERT_*= and sources the profile. Log out and back in afterwards.
 
-** TODO 6.5 Guix: pull and install the profile
+** DONE 6.5 Guix: pull and install the profile
 #+begin_src sh
 guix pull                            # full channels.scm: guix, nonguix, rde, guix-science(+nonfree)
 hash -r; guix describe
@@ -681,7 +681,7 @@ Log out and log in on tty1: StumpWM should start. Test the locker with =loginctl
 - Check what the session actually started: =pgrep -a blueman-applet= should show =/usr/bin/blueman-applet=, and pairing a device from the applet should work rather than failing silently.
 - =udiskie-start= can stay as it is. The Guix =udiskie= only drives =udisks2=, which came from apt in 4.5.
 
-** TODO 6.7 Emacs, StumpWM and Quicklisp
+** DONE 6.7 Emacs, StumpWM and Quicklisp
 Emacs is the pc's step 3.8. =Emacs.org= is the source of truth: it tangles =init.el=, =early-init.el= and =~/.slynkrc=.
 #+begin_src sh
 emacs --batch --eval "(require 'org)" --eval '(org-babel-tangle-file "~/.emacs.d/Emacs.org")'
@@ -738,17 +738,32 @@ sudo unattended-upgrade --dry-run --debug 2>&1 | grep -i 'allowed origins'   # i
 - D4 = yes: =sudo ufw allow in on tailscale0=. SSH then only answers over the tailnet.
 
 ** TODO 7.2 xremap (optional)
-On the pc you ran xremap with =sudo=. Here, run it as your user instead, because the rule says root runs nothing from the store:
+On the pc you ran xremap with =sudo=. *Here you must not*: the package is in your Guix profile, and D1's whole point is that root never runs a store binary. =sudo xremap= also simply fails — see [[*B. Troubleshooting][Troubleshooting]]. Give your user access to the devices instead:
 #+begin_src sh
 echo uinput | sudo tee /etc/modules-load.d/uinput.conf
 echo 'KERNEL=="uinput", GROUP="input", TAG+="uaccess"' | sudo tee /etc/udev/rules.d/99-uinput.rules
 sudo usermod -aG input nabeel
 sudo reboot
 #+end_src
-Then add this line to =~/.xinitrc=, before =exec stumpwm=:
+Instead of rebooting you can load the module and reload the rules by hand — but the group still needs a fresh login session:
 #+begin_src sh
-xremap --watch=device,config ~/guix-config/.config/xremap/xremap.yaml &
+sudo modprobe uinput
+sudo udevadm control --reload-rules && sudo udevadm trigger /dev/uinput
 #+end_src
+Then check, in a *new* login session:
+#+begin_src sh
+id -nG | tr ' ' '\n' | grep -x input     # must print: input
+ls -l /dev/uinput /dev/input/event0      # group input (or you, via uaccess)
+xremap --version                         # 0.10.17; the binary is "xremap", the package "xremap-x11"
+xremap --watch=device,config ~/guix-config/.config/xremap/xremap.yaml
+#+end_src
+To start it with the session, add this to =~/.stumpwm.d/xinitrc= before =exec stumpwm= — that file *is* =~/.xinitrc= since [[*6.6 StumpWM session][6.6]], and it is shared with the pc, so keep it behind the hostname test it already defines:
+#+begin_src sh
+if [ "$host" = thinkpad ] && command -v xremap > /dev/null 2>&1; then
+    xremap --watch=device,config "$HOME/guix-config/.config/xremap/xremap.yaml" &
+fi
+#+end_src
+Then commit it in =stumpwm-config=.
 The trade-off: membership in the =input= group can read every keyboard. Under X11, any program you run can already log keystrokes, so this adds little on this machine.
 
 ** TODO 7.3 Containers (only if you need them)
@@ -796,6 +811,7 @@ For advisories, watch https://guix.gnu.org/en/blog/ or subscribe to =info-guix@g
 - *The machine boots a fresh session instead of resuming*: =/etc/initramfs-tools/conf.d/resume= points at the wrong swap. If it names a =UUID=, that UUID went stale when 4.7 ran =mkswap=; if it names a =/dev/mapper/…= path, check the path still exists. Fix it, then =sudo update-initramfs -u -k all=.
 - *=systemctl hibernate= says the operation isn't supported*: Secure Boot is on, which locks the kernel down. Turn it off in BIOS setup (3.1, D7).
 - *The USB stick or network boot won't start when Secure Boot is on* ("Security violation" / "verification failed"): the firmware's db lacks a CA the shim needs. Turn Secure Boot off, install, do 4.2 (=fwupd= adds the 2023 CA), turn it back on, and confirm with =mokutil --sb-state=.
+- *=sudo: xremap: command not found=* (or any other Guix program under =sudo=): Debian's =sudo= throws your =PATH= away and uses =secure_path= from =/etc/sudoers= — =/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin= — which does not include =~/.guix-profile/bin=. Confirm with =sudo -l | grep -i 'secure path'=. The same command works on the pc because =xremap-x11= is a *system* package there (=config-pc.scm=), so the binary sits in =/run/current-system/profile/bin=, which is in root's =PATH=. Resist the obvious workarounds — =sudo "$(command -v xremap)"= or =sudo env "PATH=$PATH" xremap= — because both put root in charge of a store binary, which is exactly what D1 rules out on this machine. Run it as your user instead: [[*7.2 xremap (optional)][7.2]].
 - *=guix-install.sh= says "Missing commands: newgidmap"*: run =sudo apt install uidmap=.
 - *The daemon runs as =root=*: the installer took the privileged path. Either the unit had no =User=guix-daemon= (wrong tarball), or systemd wasn't detected. Uninstall and redo 5.1–5.2.
 - *AppArmor blocks builds*: =sudo journalctl -k | grep 'apparmor="DENIED".*guix'=. Report it upstream. As a last resort, run =sudo apt install apparmor-utils && sudo aa-complain guix-daemon=.
