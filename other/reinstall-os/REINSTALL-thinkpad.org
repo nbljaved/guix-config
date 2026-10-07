@@ -330,7 +330,7 @@ sudo reboot
 - If fwupd offers a *System Firmware* (BIOS) update, apply it on AC power.
 - If it doesn't, compare the BIOS version from 1.1 with Lenovo's T460 support page. The "BIOS Update (Bootable CD)" ISO can be turned into a USB image with =geteltorito= (Debian package =genisoimage=).
 
-** TODO 4.3 Automatic security updates
+** DONE 4.3 Automatic security updates
 #+begin_src sh
 sudo apt install unattended-upgrades apt-listchanges
 sudo dpkg-reconfigure -plow unattended-upgrades       # answer Yes
@@ -347,11 +347,7 @@ sudo apt install needrestart                          # hooks into apt and repor
 cat /var/run/reboot-required 2>/dev/null              # present = restart to finish applying updates
 sudo needrestart -r l                                 # list services that want restarting
 #+end_src
-- Check that marker file now and then. It's also worth a line in your =.bashrc= if you'd like the reminder.
-  #+caption: For ai
-  #+begin_quote
-  Yes add it to my bashrc, that if hostname is thinkpad then check marker file and tell me.
-  #+end_quote
+- You don't have to remember to check the marker: =~/shell-config/.bashrc= does it in every new terminal when =$HOSTNAME= is =thinkpad=, and prints the packages that asked for the reboot. It lives in =.bashrc= and not =.bash_profile= because the tty1 login shell runs =exec startx= straight away, so a login-time message would never be seen.
 - If you'd rather it handled itself, add =Unattended-Upgrade::Automatic-Reboot "true";= and =Unattended-Upgrade::Automatic-Reboot-Time "04:00";= to =/etc/apt/apt.conf.d/50unattended-upgrades=. On a laptop that's rarely awake at 04:00, the marker plus a habit works better.
 - Logs live in =/var/log/unattended-upgrades/=, and =apt-listchanges= shows what changed.
 
@@ -365,7 +361,7 @@ sudo ufw status verbose
 #+end_src
 Outgoing connections, including Tailscale's, still work. The tailnet rule for D4 comes in [[*7.1 Tailscale][7.1]].
 
-** TODO 4.5 Host packages
+** DONE 4.5 Host packages
 #+begin_src sh
 sudo apt install \
   xserver-xorg-core xserver-xorg-input-libinput xinit xauth x11-xserver-utils \
@@ -375,18 +371,18 @@ sudo apt install \
   git curl make age zstd \
   pulseaudio-utils brightnessctl blueman
 #+end_src
-| Package(s)                   | Why                                                                                            |
-|------------------------------+------------------------------------------------------------------------------------------------|
-| =xserver-xorg-*=, =xinit=, =xauth= | X from Debian; StumpWM from Guix is just an X client                                           |
-| =i3lock=, =xss-lock=             | the screen locker authenticates through *Debian's* PAM; =xss-lock= locks on suspend                |
-| =dbus-user-session=, =dbus-bin=  | a per-user D-Bus for PipeWire, notifications and portals; =dbus-bin= has the tool =.xinitrc= calls |
-| =nscd=                         | the Guix manual recommends it on other distros, so Guix programs can look up users and hosts   |
-| =uidmap=                       | provides =newgidmap=: the installer refuses to set up the unprivileged daemon without it         |
-| =gnupg=, =wget=, =xz-utils=        | required by =guix-install.sh=                                                                    |
-| =git=, =curl=, =make=, =age=, =zstd=   | needed before Guix exists: cloning and the =Makefile=; =age= also decrypts =diary.org.age= (6.1)      |
-| =pulseaudio-utils=              | gives =pactl=, which your StumpWM volume and mic keys call; it talks to PipeWire through =pipewire-pulse= |
-| =brightnessctl=                 | for its udev rule, which lets the =video= group write =/sys/class/backlight=; your backlight keys need that |
-| =blueman=                       | the applet needs =blueman-mechanism=, a root D-Bus service that only a system package can register |
+| Package(s)                   | Why                                                                                                     |
+|------------------------------+---------------------------------------------------------------------------------------------------------|
+| =xserver-xorg-*=, =xinit=, =xauth= | X from Debian; StumpWM from Guix is just an X client                                                    |
+| =i3lock=, =xss-lock=             | the screen locker authenticates through *Debian's* PAM; =xss-lock= locks on suspend                         |
+| =dbus-user-session=, =dbus-bin=  | a per-user D-Bus for PipeWire, notifications and portals; =dbus-bin= has the tool =.xinitrc= calls          |
+| =nscd=                         | the Guix manual recommends it on other distros, so Guix programs can look up users and hosts            |
+| =uidmap=                       | provides =newgidmap=: the installer refuses to set up the unprivileged daemon without it                  |
+| =gnupg=, =wget=, =xz-utils=        | required by =guix-install.sh=                                                                             |
+| =git=, =curl=, =make=, =age=, =zstd=   | needed before Guix exists: cloning and the =Makefile=; =age= also decrypts =diary.org.age= (6.1)              |
+| =pulseaudio-utils=             | gives =pactl=, which your StumpWM volume and mic keys call; it talks to PipeWire through =pipewire-pulse=   |
+| =brightnessctl=                | for its udev rule, which lets the =video= group write =/sys/class/backlight=; your backlight keys need that |
+| =blueman=                      | the applet needs =blueman-mechanism=, a root D-Bus service that only a system package can register        |
 
 Then check the keys your StumpWM config depends on:
 #+begin_src sh
@@ -464,14 +460,14 @@ sudo systemctl hibernate
   sudo lvextend -l +100%FREE /dev/<vg>/root && sudo resize2fs /dev/<vg>/root
   df -h /
   #+end_src
-- TODO: Optional, and the better default for a laptop: suspend first, hibernate later.
+- DONE: Optional, and the better default for a laptop: suspend first, hibernate later.
 #+begin_src sh
 sudo mkdir -p /etc/systemd/sleep.conf.d /etc/systemd/logind.conf.d
-printf '[Sleep]\nHibernateDelaySec=30min\n' | sudo tee /etc/systemd/sleep.conf.d/10-delay.conf
+printf '[Sleep]\nHibernateDelaySec=15min\n' | sudo tee /etc/systemd/sleep.conf.d/10-delay.conf
 printf '[Login]\nHandleLidSwitch=suspend-then-hibernate\n' | sudo tee /etc/systemd/logind.conf.d/10-lid.conf
 sudo systemctl restart systemd-logind
 #+end_src
-  Closing the lid suspends, and 30 minutes later the machine hibernates, so the keys don't sit in RAM all night. =xss-lock= (4.5, wired up in [[*6.6 StumpWM session][6.6]]) locks the screen for both.
+  Closing the lid suspends, and 15 minutes later the machine hibernates, so the keys don't sit in RAM all night. =xss-lock= (4.5, wired up in [[*6.6 StumpWM session][6.6]]) locks the screen for both.
 
 * Phase 5 — Install Guix (T460)
 ** DONE 5.1 Download the patched tarball and the installer
@@ -660,7 +656,7 @@ make apply-guix-profile              # = guix package -m current-profile-manifes
 - If a local build fails with =chown= / =Errno 22=, see [[*B. Troubleshooting][Troubleshooting]].
 - Then open a new login shell and run =fc-cache -f= (Guix's fontconfig, from =thinkpad-manifest.scm=).
 
-** TODO 6.6 StumpWM session
+** DONE 6.6 StumpWM session
 This step used to write =~/.xinitrc= by hand. It now lives in the =stumpwm-config= repo, hostname-guarded so the pc is unaffected, and documented in its =Readme.org= under "Starting the session":
 #+begin_src sh
 ln -sf ~/.stumpwm.d/xinitrc ~/.xinitrc
@@ -700,18 +696,18 @@ ls -l ~/quicklisp/local-projects/    # clx-truetype -> /home/nabeel/.stumpwm.d/c
 - It needs =sbcl= (=thinkpad-manifest.scm=), =curl= and =gpg= (both from 4.5), and the network. It never calls =guix=, so it is also safe to run on the pc before its reinstall.
 - If you ever want the TrueType font on the laptop too, =load-fonts.lisp= hard-codes =/run/current-system/profile/share/fonts/=, which does not exist on Debian. It would have to become =~/.guix-profile/share/fonts/= (plus =/usr/share/fonts/=) before lifting the =(when pc?)= guard is worth trying.
 
-** TODO 6.8 What you don't have, and where to get it
+** DONE 6.8 What you don't have, and where to get it
 There is no archive (D8). This is what the old T460 home had that GitHub doesn't:
-| What                                                               | What to do about it                                                           |
-|--------------------------------------------------------------------+-------------------------------------------------------------------------------|
-| =.sbclrc=, =.gitconfig=, =.config/git/ignore=                          | symlinked from =shell-config= in 6.4                                            |
+| What                                                             | What to do about it                                                                 |
+|------------------------------------------------------------------+-------------------------------------------------------------------------------------|
+| =.sbclrc=, =.gitconfig=, =.config/git/ignore=                          | symlinked from =shell-config= in 6.4                                                  |
 | =.Xresources=, =.Xdefaults=                                          | now =Xresources= / =Xresources.thinkpad= in =stumpwm-config=, merged by its =xinitrc= (6.6) |
-| =~/.slynkrc=                                                         | tangled from =Emacs.org= in 6.7                                                 |
-| =~/quicklisp=                                                        | rebuilt from upstream in 6.7                                                  |
-| =~/.age/key=                                                         | only if you want the diary here: 6.1                                          |
-| Wi-Fi passwords                                                    | retype them once in =nm-applet=                                                 |
-| =~/.bash_history=, =~/.fehbg=, the browser profile, loose files in =~=   | gone. Chrome brings bookmarks and passwords back when you sign in             |
-| anything you notice later                                          | the pc still has its own copy of most of it; compare and =scp=                  |
+| =~/.slynkrc=                                                       | tangled from =Emacs.org= in 6.7                                                       |
+| =~/quicklisp=                                                      | rebuilt from upstream in 6.7                                                        |
+| =~/.age/key=                                                       | only if you want the diary here: 6.1                                                |
+| Wi-Fi passwords                                                  | retype them once in =nm-applet=                                                       |
+| =~/.bash_history=, =~/.fehbg=, the browser profile, loose files in =~= | gone. Chrome brings bookmarks and passwords back when you sign in                   |
+| anything you notice later                                        | the pc still has its own copy of most of it; compare and =scp=                        |
 #+begin_src sh
 ssh nabeel@<pc> 'ls -A ~' > /tmp/pc-home; diff /tmp/pc-home <(ls -A ~) | less   # after 7.1
 #+end_src
@@ -737,7 +733,7 @@ sudo unattended-upgrade --dry-run --debug 2>&1 | grep -i 'allowed origins'   # i
 - In the Tailscale admin console, *delete the old thinkpad node*, and rename the new one if needed.
 - D4 = yes: =sudo ufw allow in on tailscale0=. SSH then only answers over the tailnet.
 
-** TODO 7.2 xremap (optional)
+** DONE 7.2 xremap (optional)
 On the pc you ran xremap with =sudo=. *Here you must not*: the package is in your Guix profile, and D1's whole point is that root never runs a store binary. =sudo xremap= also simply fails — see [[*B. Troubleshooting][Troubleshooting]]. Give your user access to the devices instead:
 #+begin_src sh
 echo uinput | sudo tee /etc/modules-load.d/uinput.conf
@@ -779,29 +775,29 @@ git commit -m "thinkpad: now Debian + Guix; drop its Guix System config"
 git push
 #+end_src
 
-** TODO 8.2 Done checklist [0/12]
-- [ ] =mokutil --sb-state=: *disabled*, on purpose (D7), and =sudo fwupdmgr get-updates= has nothing pending
-- [ ] The LUKS passphrase is asked at boot; =lsblk -f= shows =crypto_LUKS=
-- [ ] =sudo ufw status=: active; =sudo ss -tlnp= shows nothing unexpected listening
-- [ ] =unattended-upgrades=: Debian-Security and Tailscale origins allowed (7.1)
-- [ ] The 5.3 checks pass after 5.4; =guix build hello= downloads rather than builds
-- [ ] StumpWM starts from tty1; no locale warnings; fonts look right
-- [ ] The screen locks on lid close and on =loginctl lock-session=, and your password unlocks it
+** TODO 8.2 Done checklist [10/12]
+- [X] =mokutil --sb-state=: *disabled*, on purpose (D7), and =sudo fwupdmgr get-updates= has nothing pending
+- [X] The LUKS passphrase is asked at boot; =lsblk -f= shows =crypto_LUKS=
+- [X] =sudo ufw status=: active; =sudo ss -tlnp= shows nothing unexpected listening
+- [X] =unattended-upgrades=: Debian-Security and Tailscale origins allowed (7.1)
+- [X] The 5.3 checks pass after 5.4; =guix build hello= downloads rather than builds
+- [X] StumpWM starts from tty1; no locale warnings; fonts look right
+- [X] The screen locks on lid close and on =loginctl lock-session=, and your password unlocks it
 - [ ] Wi-Fi, Bluetooth, sound (=pavucontrol=), suspend and resume
 - [ ] =tailscale status= works, and the old node is deleted
-- [ ] Emacs starts cleanly; =magit= can push
-- [ ] =sudo systemctl hibernate= powers off, and the next boot asks the LUKS passphrase and restores the session (4.7)
-- [ ] Nothing is still waiting on a backup: =ls -l ~/.sbclrc ~/.Xresources ~/.gitconfig= point into =shell-config=, and =bash ~/repo-risk.sh= says =ok= on every line (D8)
+- [X] Emacs starts cleanly; =magit= can push
+- [X] =sudo systemctl hibernate= powers off, and the next boot asks the LUKS passphrase and restores the session (4.7)
+- [X] Nothing is still waiting on a backup: =ls -l ~/.sbclrc ~/.Xresources ~/.gitconfig= point into =shell-config=, and =bash ~/repo-risk.sh= says =ok= on every line (D8)
 
 * Appendix
 ** A. Keeping it patched
-| What                                    | How                                                        | Automatic?                                  |
-|-----------------------------------------+------------------------------------------------------------+---------------------------------------------|
-| Debian: kernel, X, i3lock, OpenSSH, …   | =unattended-upgrades= (4.3)                                | yes; then reboot when flagged (4.3)         |
-| Tailscale                               | =unattended-upgrades= with =origin=Tailscale= (7.1)        | yes                                         |
-| *guix-daemon*                           | =sudo -i guix pull && sudo systemctl restart guix-daemon=  | *no*: run it whenever a Guix advisory lands, and every few weeks |
-| Your Guix apps                          | =guix pull && make apply-guix-profile=                     | no                                          |
-| Firmware updates (=fwupd=)              | =sudo fwupdmgr refresh && sudo fwupdmgr update=            | no: check now and then                      |
+| What                                  | How                                                     | Automatic?                                                     |
+|---------------------------------------+---------------------------------------------------------+----------------------------------------------------------------|
+| Debian: kernel, X, i3lock, OpenSSH, … | =unattended-upgrades= (4.3)                               | yes; then reboot when flagged (4.3)                            |
+| Tailscale                             | =unattended-upgrades= with =origin=Tailscale= (7.1)         | yes                                                            |
+| *guix-daemon*                           | =sudo -i guix pull && sudo systemctl restart guix-daemon= | *no*: run it whenever a Guix advisory lands, and every few weeks |
+| Your Guix apps                        | =guix pull && make apply-guix-profile=                    | no                                                             |
+| Firmware updates (=fwupd=)              | =sudo fwupdmgr refresh && sudo fwupdmgr update=           | no: check now and then                                         |
 For advisories, watch https://guix.gnu.org/en/blog/ or subscribe to =info-guix@gnu.org=. The July 2026 flaw is the reason this file exists.
 
 ** B. Troubleshooting
@@ -881,7 +877,7 @@ done
   - The E.5 command passes =dnsmasq --test= with the store's 2.90 and 2.92. Guix's =iptables= is the legacy backend, the same one =iptables-service-type= uses.
   - The flaw needs a download: "The remote exploitation of guix substitute only requires that the vulnerable system attempt to download a binary substitute" (the advisory). 2.0 and E.0 therefore run store copies directly.
 
-** E. Network boot instead of a USB stick
+** COMMENT E. Network boot instead of a USB stick
 This replaces the USB stick in Phase 2 and 3.1. Nothing else changes. The pc side works before or after the pc reinstall, because it never asks =guix= to download anything (E.0).
 #+begin_example
    internet
